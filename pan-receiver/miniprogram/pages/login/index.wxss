@@ -1,0 +1,21 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  padding: 40rpx;
+}
+.logo {
+  font-size: 48rpx;
+  font-weight: bold;
+  margin-bottom: 20rpx;
+}
+.desc {
+  font-size: 28rpx;
+  color: #666;
+  margin-bottom: 80rpx;
+}
+.login-btn {
+  width: 80%;
+}

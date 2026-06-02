@@ -1,0 +1,30 @@
+<view class="container">
+  <view class="card" wx:if="{{task}}">
+    <view class="title">{{task.title}}</view>
+    <view class="desc">{{task.description || '无描述'}}</view>
+    <view class="meta">
+      <text>状态：{{task.status === 'active' ? '进行中' : '已关闭'}}</text>
+      <text>提交数：{{task.submissionCount}}</text>
+      <text>文件数：{{task.fileCount}}</text>
+    </view>
+    <view class="meta" wx:if="{{task.deadline}}">
+      <text>截止：{{task.deadline}}</text>
+    </view>
+    <view class="path" wx:if="{{task.targetPath}}">
+      <text>接收目录：{{task.targetPath}}</text>
+    </view>
+  </view>
+
+  <view class="actions" wx:if="{{task && task.status === 'active'}}">
+    <button class="btn-default" bindtap="copySharePath">复制分享链接</button>
+    <button class="btn-default" bindtap="closeTask">关闭任务</button>
+  </view>
+
+  <view class="submissions" wx:if="{{submissions.length > 0}}">
+    <view class="section-title">提交记录</view>
+    <view class="sub-item" wx:for="{{submissions}}" wx:key="id">
+      <text>{{item.submitterName || '匿名用户'}}</text>
+      <text class="sub-status {{item.status}}">{{item.statusText}}</text>
+    </view>
+  </view>
+</view>

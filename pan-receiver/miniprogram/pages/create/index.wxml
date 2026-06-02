@@ -1,0 +1,23 @@
+<view class="container">
+  <view class="form">
+    <view class="form-item">
+      <text class="label">任务标题</text>
+      <input placeholder="例如：收集项目资料" value="{{title}}" bindinput="onInput" data-field="title" />
+    </view>
+    <view class="form-item">
+      <text class="label">描述</text>
+      <textarea placeholder="说明需要收集的文件类型" value="{{description}}" bindinput="onInput" data-field="description" />
+    </view>
+    <view class="form-item">
+      <text class="label">接收目录</text>
+      <input placeholder="/我的资源/项目资料" value="{{targetPath}}" bindinput="onInput" data-field="targetPath" />
+    </view>
+    <view class="form-item">
+      <text class="label">截止日期</text>
+      <picker mode="date" value="{{deadline}}" bindchange="onDateChange">
+        <view class="picker">{{deadline || '请选择截止日期'}}</view>
+      </picker>
+    </view>
+    <button type="primary" bindtap="submit">创建任务</button>
+  </view>
+</view>

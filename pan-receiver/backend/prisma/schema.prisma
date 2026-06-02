@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                          String   @id @default(cuid()) @map("id")
+  wxOpenid                    String   @unique @map("wx_openid")
+  wxUnionid                   String?  @map("wx_unionid")
+  nickname                    String?  @map("nickname")
+  avatarUrl                   String?  @map("avatar_url")
+  baiduUid                    String?  @map("baidu_uid")
+  baiduUk                     String?  @map("baidu_uk")
+  baiduNickname               String?  @map("baidu_nickname")
+  baiduAccessTokenEncrypted   String?  @map("baidu_access_token_encrypted")
+  baiduRefreshTokenEncrypted  String?  @map("baidu_refresh_token_encrypted")
+  baiduTokenExpireAt          DateTime? @map("baidu_token_expire_at")
+  baiduScope                  String?  @map("baidu_scope")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  ownedTasks    ReceiveTask[]
+  submissions   Submission[]
+  submitterFiles SubmissionFile[] @relation("SubmitterFiles")
+  ownedFiles     SubmissionFile[] @relation("OwnedFiles")
+  ownedTransferJobs TransferJob[] @relation("OwnedTransferJobs")
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model ReceiveTask {
+  id                        String   @id @default(cuid()) @map("id")
+  ownerUserId               String   @map("owner_user_id")
+  title                     String   @map("title")
+  description               String?  @map("description")
+  targetPath                String   @map("target_path")
+  shareCodeHash             String   @map("share_code_hash")
+  deadline                  DateTime? @map("deadline")
+  maxFileSize               BigInt   @default(524288000) @map("max_file_size")
+  maxFileCountPerSubmission Int      @default(20) @map("max_file_count_per_submission")
+  allowRepeatSubmit         Boolean  @default(true) @map("allow_repeat_submit")
+  autoCreateSubmitterFolder Boolean  @default(true) @map("auto_create_submitter_folder")
+  status                    String   @default("active") @map("status")
+  totalSubmissionCount      Int      @default(0) @map("total_submission_count")
+  uniqueSubmitterCount      Int      @default(0) @map("unique_submitter_count")
+  totalFileCount            Int      @default(0) @map("total_file_count")
+  totalReceivedSize         BigInt   @default(0) @map("total_received_size")
+  failedFileCount           Int      @default(0) @map("failed_file_count")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  owner       User         @relation(fields: [ownerUserId], references: [id])
+  submissions Submission[]
+  submissionFiles SubmissionFile[]
+
+  @@map("receive_tasks")
+}
+
+model Submission {
+  id            String   @id @default(cuid()) @map("id")
+  taskId        String   @map("task_id")
+  submitterUserId String @map("submitter_user_id")
+  sourceType    String   @map("source_type")
+  status        String   @default("created") @map("status")
+  fileCount     Int      @default(0) @map("file_count")
+  totalSize     BigInt   @default(0) @map("total_size")
+  successCount  Int      @default(0) @map("success_count")
+  failedCount   Int      @default(0) @map("failed_count")
+  errorCode     String?  @map("error_code")
+  errorMessage  String?  @map("error_message")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  task          ReceiveTask      @relation(fields: [taskId], references: [id])
+  submitter     User             @relation(fields: [submitterUserId], references: [id])
+  files         SubmissionFile[]
+  transferJobs  TransferJob[]
+
+  @@map("submissions")
+}
+
+model SubmissionFile {
+  id                    String   @id @default(cuid()) @map("id")
+  submissionId          String   @map("submission_id")
+  taskId                String   @map("task_id")
+  submitterUserId       String   @map("submitter_user_id")
+  ownerUserId           String   @map("owner_user_id")
+  fileName              String   @map("file_name")
+  fileSize              BigInt   @map("file_size")
+  fileExt               String?  @map("file_ext")
+  fileMime              String?  @map("file_mime")
+  sourceType            String   @map("source_type")
+  localTempStorageKey   String?  @map("local_temp_storage_key")
+  submitterPanPath      String?  @map("submitter_pan_path")
+  submitterPanFsId      String?  @map("submitter_pan_fs_id")
+  shareId               String?  @map("share_id")
+  shareUrl              String?  @map("share_url")
+  ownerTargetPath       String?  @map("owner_target_path")
+  ownerTransferredFsId  String?  @map("owner_transferred_fs_id")
+  transferStatus        String   @default("selected") @map("transfer_status")
+  errorCode             String?  @map("error_code")
+  errorMessage          String?  @map("error_message")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  submission    Submission   @relation(fields: [submissionId], references: [id])
+  task          ReceiveTask  @relation(fields: [taskId], references: [id])
+  submitter     User         @relation("SubmitterFiles", fields: [submitterUserId], references: [id])
+  owner         User         @relation("OwnedFiles", fields: [ownerUserId], references: [id])
+
+  @@map("submission_files")
+}
+
+model TransferJob {
+  id              String   @id @default(cuid()) @map("id")
+  submissionId    String   @map("submission_id")
+  fileId          String   @map("file_id")
+  ownerUserId     String   @map("owner_user_id")
+  submitterUserId String   @map("submitter_user_id")
+  status          String   @default("pending") @map("status")
+  retryCount      Int      @default(0) @map("retry_count")
+  maxRetryCount   Int      @default(3) @map("max_retry_count")
+  nextRetryAt     DateTime? @map("next_retry_at")
+  idempotencyKey  String   @unique @map("idempotency_key")
+  lastError       String?  @map("last_error")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  submission    Submission   @relation(fields: [submissionId], references: [id])
+  owner         User         @relation("OwnedTransferJobs", fields: [ownerUserId], references: [id])
+
+  @@map("transfer_jobs")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid()) @map("id")
+  userId    String?  @map("user_id")
+  action    String   @map("action")
+  targetType String? @map("target_type")
+  targetId  String?  @map("target_id")
+  metadata  String?  @map("metadata")
+  ip        String?  @map("ip")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}

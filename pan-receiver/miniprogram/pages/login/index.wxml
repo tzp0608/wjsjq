@@ -1,0 +1,5 @@
+<view class="container">
+  <view class="logo">网盘收件助手</view>
+  <view class="desc">一键收集文件到百度网盘</view>
+  <button class="login-btn" type="primary" bindtap="handleLogin">微信一键登录</button>
+</view>

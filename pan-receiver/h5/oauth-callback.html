@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>百度网盘授权</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }
+    .box { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); text-align: center; }
+    h1 { font-size: 24px; margin-bottom: 12px; }
+    p { color: #666; }
+  </style>
+</head>
+<body>
+  <div class="box" id="box">
+    <h1>授权中...</h1>
+    <p>正在完成百度网盘授权，请稍候</p>
+  </div>
+  <script>
+    (function() {
+      var params = new URLSearchParams(location.search);
+      var code = params.get('code');
+      var state = params.get('state');
+      if (!code || !state) {
+        document.getElementById('box').innerHTML = '<h1>参数错误</h1><p>缺少授权参数</p>';
+        return;
+      }
+      var apiBase = location.origin;
+      fetch(apiBase + '/api/auth/baidu/callback?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.redirect) {
+            document.getElementById('box').innerHTML = '<h1>授权成功</h1><p>请返回小程序继续操作</p>';
+          } else {
+            document.getElementById('box').innerHTML = '<h1>授权成功</h1><p>请返回小程序继续操作</p>';
+          }
+        })
+        .catch(function() {
+          document.getElementById('box').innerHTML = '<h1>授权失败</h1><p>请返回小程序重试</p>';
+        });
+    })();
+  </script>
+</body>
+</html>

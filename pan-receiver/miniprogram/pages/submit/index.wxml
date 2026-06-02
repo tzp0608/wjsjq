@@ -1,0 +1,45 @@
+<view class="container">
+  <view class="task-info" wx:if="{{task}}">
+    <view class="task-title">{{task.title}}</view>
+    <view class="task-desc">{{task.description}}</view>
+    <view class="task-meta">
+      <text>发起人：{{task.ownerName}}</text>
+      <text wx:if="{{task.deadline}}">截止：{{task.deadline}}</text>
+    </view>
+  </view>
+
+  <view class="bind-tip" wx:if="{{!loggedIn}}">
+    <text>提交文件需要先登录</text>
+    <button class="btn-primary" bindtap="goLogin">去登录</button>
+  </view>
+
+  <view class="bind-tip" wx:if="{{loggedIn && !baiduBound}}">
+    <text>提交文件需要先绑定百度网盘</text>
+    <button class="btn-primary" bindtap="bindBaidu">绑定百度网盘</button>
+  </view>
+
+  <view wx:if="{{loggedIn && baiduBound}}">
+    <view class="actions">
+      <button class="action-btn" bindtap="chooseMessageFile">选择聊天文件</button>
+      <button class="action-btn" bindtap="chooseMedia">选择相册图片/视频</button>
+    </view>
+
+    <view class="file-list" wx:if="{{files.length > 0}}">
+      <view class="file-item" wx:for="{{files}}" wx:key="path">
+        <text class="file-name">{{item.name}}</text>
+        <text class="file-size">{{(item.size / 1024 / 1024).toFixed(2)}} MB</text>
+      </view>
+      <button type="primary" bindtap="submitFiles">确认提交</button>
+    </view>
+  </view>
+
+  <view class="status" wx:if="{{submissionId}}">
+    <text>提交单号：{{submissionId}}</text>
+    <text>状态：{{status}}</text>
+  </view>
+
+  <view class="status" wx:if="{{submissionId}}">
+    <text>提交单号：{{submissionId}}</text>
+    <text>状态：{{status}}</text>
+  </view>
+</view>

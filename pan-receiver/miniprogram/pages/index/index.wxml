@@ -1,0 +1,19 @@
+<view class="container">
+  <view class="header">
+    <text class="title">我的收集任务</text>
+    <button class="create-btn" bindtap="goCreate">+ 新建任务</button>
+  </view>
+  <view class="task-list">
+    <block wx:for="{{tasks}}" wx:key="taskId">
+      <view class="task-card" bindtap="goDetail" data-id="{{item.taskId}}">
+        <view class="task-title">{{item.title}}</view>
+        <view class="task-meta">
+          <text>提交 {{item.submissionCount}}</text>
+          <text>文件 {{item.fileCount}}</text>
+        </view>
+        <view class="task-status {{item.status}}">{{item.status === 'active' ? '进行中' : '已关闭'}}</view>
+      </view>
+    </block>
+    <view wx:if="{{tasks.length === 0}}" class="empty">暂无任务，点击上方按钮创建</view>
+  </view>
+</view>

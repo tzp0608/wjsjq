@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",
+    "module": "commonjs",
+    "strict": false,
+    "jsx": "preserve",
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./utils/*"]
+    },
+    "lib": ["ES2015", "DOM"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

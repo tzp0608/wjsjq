@@ -1,0 +1,74 @@
+.container {
+  padding: 30rpx;
+}
+.card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 30rpx;
+  margin-bottom: 30rpx;
+}
+.title {
+  font-size: 36rpx;
+  font-weight: bold;
+  margin-bottom: 16rpx;
+}
+.desc {
+  font-size: 28rpx;
+  color: #666;
+  margin-bottom: 20rpx;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  font-size: 26rpx;
+  color: #999;
+  margin-bottom: 12rpx;
+}
+.path {
+  font-size: 26rpx;
+  color: #666;
+  margin-top: 12rpx;
+  word-break: break-all;
+}
+.actions {
+  display: flex;
+  gap: 20rpx;
+  margin-bottom: 30rpx;
+}
+.btn-default {
+  flex: 1;
+  background: #f5f5f5;
+  color: #333;
+  font-size: 28rpx;
+}
+.section-title {
+  font-size: 32rpx;
+  font-weight: 500;
+  margin-bottom: 20rpx;
+}
+.submissions {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 30rpx;
+}
+.sub-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #eee;
+  font-size: 28rpx;
+}
+.sub-status {
+  font-size: 24rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}
+.sub-status.success {
+  background: #e6f7ed;
+  color: #07c160;
+}
+.sub-status.failed {
+  background: #fff1f0;
+  color: #ff4d4f;
+}

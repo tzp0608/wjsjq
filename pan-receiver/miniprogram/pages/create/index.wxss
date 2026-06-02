@@ -1,0 +1,28 @@
+.container {
+  padding: 30rpx;
+}
+.form-item {
+  margin-bottom: 30rpx;
+  background: #fff;
+  border-radius: 12rpx;
+  padding: 20rpx;
+}
+.label {
+  display: block;
+  font-size: 28rpx;
+  color: #333;
+  margin-bottom: 12rpx;
+}
+input, textarea, .picker {
+  font-size: 30rpx;
+  color: #333;
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid #eee;
+}
+textarea {
+  height: 120rpx;
+  width: 100%;
+}
+.picker {
+  color: #666;
+}
