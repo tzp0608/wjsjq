@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Get, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query, UseGuards, Req, Res } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -42,12 +43,25 @@ export class AuthController {
     @Query('redirect') redirect: string,
     @Req() req: any,
   ) {
-    return this.auth.generateBaiduAuthUrl(role || 'owner', redirect || '/pages/index/index', req.user.userId);
+    return this.auth.generateBaiduAuthUrl(role || 'owner', redirect || '/', req.user.userId);
   }
 
   @Get('baidu/callback')
-  async baiduCallback(@Query('code') code: string, @Query('state') state: string) {
-    return this.auth.baiduCallback(code, state);
+  async baiduCallback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
+    const result = await this.auth.baiduCallback(code, state);
+    const redirect = result.redirect || '/';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif;">
+<div style="text-align:center;">
+<h2 style="color:#07c160;">百度网盘绑定成功</h2>
+<p>正在跳转...</p>
+<script>window.location.replace('${redirect}');</script>
+</div>
+</body>
+</html>`);
   }
 
   @Post('baidu/unbind')
