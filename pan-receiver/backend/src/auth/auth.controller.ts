@@ -10,6 +10,16 @@ export class AuthController {
     private prisma: PrismaService,
   ) {}
 
+  @Post('register')
+  async register(@Body('username') username: string, @Body('password') password: string) {
+    return this.auth.register(username, password);
+  }
+
+  @Post('login')
+  async login(@Body('username') username: string, @Body('password') password: string) {
+    return this.auth.login(username, password);
+  }
+
   @Post('wechat-login')
   async wechatLogin(@Body('code') code: string) {
     return this.auth.wechatLogin(code);

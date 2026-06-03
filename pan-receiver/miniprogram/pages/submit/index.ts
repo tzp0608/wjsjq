@@ -45,8 +45,15 @@ Page({
         url: '/api/auth/baidu/auth-url?role=submitter&redirect=/pages/submit/index',
         method: 'GET',
       });
-      wx.navigateTo({
-        url: `/pages/webview/index?url=${encodeURIComponent(res.authUrl)}`,
+      wx.setClipboardData({
+        data: res.authUrl,
+        success: () => {
+          wx.showModal({
+            title: '请复制链接到浏览器授权',
+            content: '百度授权链接已复制到剪贴板。请打开手机浏览器粘贴访问，完成授权后返回小程序即可。',
+            showCancel: false,
+          });
+        },
       });
     } catch (e: any) {
       wx.showToast({ title: e?.message || '获取授权链接失败', icon: 'none' });

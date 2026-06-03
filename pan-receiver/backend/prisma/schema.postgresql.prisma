@@ -9,8 +9,10 @@ datasource db {
 
 model User {
   id                          String   @id @default(cuid()) @map("id")
-  wxOpenid                    String   @unique @map("wx_openid")
+  wxOpenid                    String?  @unique @map("wx_openid")
   wxUnionid                   String?  @map("wx_unionid")
+  username                    String?  @unique @map("username")
+  passwordHash                String?  @map("password_hash")
   nickname                    String?  @map("nickname")
   avatarUrl                   String?  @map("avatar_url")
   baiduUid                    String?  @map("baidu_uid")

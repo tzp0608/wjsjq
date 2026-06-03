@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>文件接收助手</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal-overlay">
+    <div class="modal-content">
+      <div id="modal-title" class="modal-title"></div>
+      <div id="modal-body" class="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn btn-default">取消</button>
+        <button id="modal-confirm" class="btn btn-primary">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Page: Login ========== -->
+  <div id="page-login" class="page">
+    <div class="header">
+      文件接收助手
+      <div class="sub">便捷收集文件，自动转存百度网盘</div>
+    </div>
+    <div class="container">
+      <div class="login-logo">
+        <h1>文件接收助手</h1>
+        <p>登录后开始使用</p>
+      </div>
+      <div class="card">
+        <div class="form-group">
+          <label class="form-label">用户名</label>
+          <input id="login-username" class="form-input" type="text" placeholder="请输入用户名" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label class="form-label">密码</label>
+          <input id="login-password" class="form-input" type="password" placeholder="请输入密码" autocomplete="current-password">
+        </div>
+        <button id="btn-login" class="btn btn-primary">登录</button>
+        <button id="btn-register" class="btn btn-default" style="margin-top:12px;">注册</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Page: Home ========== -->
+  <div id="page-home" class="page hidden">
+    <div class="header">
+      我的任务
+      <div class="sub">管理文件收集任务</div>
+    </div>
+    <div class="container">
+      <div id="task-list"></div>
+      <button class="btn btn-primary" onclick="location.hash='#/create'" style="margin-top:8px;">+ 创建新任务</button>
+    </div>
+  </div>
+
+  <!-- ========== Page: Create ========== -->
+  <div id="page-create" class="page hidden">
+    <div class="header">
+      创建任务
+      <div class="sub">填写信息，生成分享链接</div>
+    </div>
+    <div class="container">
+      <div class="card">
+        <div class="form-group">
+          <label class="form-label">任务标题</label>
+          <input id="create-title" class="form-input" type="text" placeholder="例如：项目资料收集">
+        </div>
+        <div class="form-group">
+          <label class="form-label">任务描述</label>
+          <textarea id="create-desc" class="form-textarea" placeholder="可选：说明需要提交的文件类型、格式要求等"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">接收目录（百度网盘路径）</label>
+          <input id="create-path" class="form-input" type="text" placeholder="例如：/接收的文件/项目资料" value="/接收的文件">
+        </div>
+        <div class="form-group">
+          <label class="form-label">截止时间（可选）</label>
+          <input id="create-deadline" class="form-input" type="date">
+        </div>
+        <button id="btn-create" class="btn btn-primary">创建任务</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Page: Task Detail ========== -->
+  <div id="page-task" class="page hidden">
+    <div class="header">
+      任务详情
+      <div class="sub">查看提交记录</div>
+    </div>
+    <div class="container">
+      <div id="task-detail-info" class="card"></div>
+      <div class="card">
+        <div class="card-title">提交记录</div>
+        <div id="task-detail-subs"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Page: Submit (Public) ========== -->
+  <div id="page-submit" class="page hidden">
+    <div class="header">
+      文件提交
+      <div class="sub">选择文件并上传</div>
+    </div>
+    <div class="container">
+      <div id="submit-task-info" class="card"></div>
+      <div id="submit-content" class="card">
+        <div class="form-group">
+          <label class="form-label">您的姓名（可选）</label>
+          <input id="submit-name" class="form-input" type="text" placeholder="填写姓名方便识别">
+        </div>
+        <div class="upload-zone" id="upload-zone">
+          <div>点击或拖拽文件到此处上传</div>
+          <div style="font-size:12px;color:#999;margin-top:8px;">支持多文件，单个不超过 500MB</div>
+          <input id="file-input" type="file" multiple>
+        </div>
+        <div id="file-list" class="file-list"></div>
+        <button id="btn-submit-files" class="btn btn-primary" style="margin-top:16px;">确认提交</button>
+      </div>
+      <div id="submit-status" class="card hidden"></div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

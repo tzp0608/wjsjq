@@ -1,9 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class AuthService {
@@ -37,6 +38,35 @@ export class AuthService {
       wxOpenid: user.wxOpenid,
     });
 
+    return {
+      token,
+      userId: user.id,
+      baiduBound: !!user.baiduUid,
+    };
+  }
+
+  async register(username: string, password: string) {
+    const existing = await this.prisma.user.findUnique({ where: { username } });
+    if (existing) {
+      throw new ConflictException('用户名已存在');
+    }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await this.prisma.user.create({
+      data: { username, passwordHash },
+    });
+    return { userId: user.id };
+  }
+
+  async login(username: string, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { username } });
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException('用户名或密码错误');
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('用户名或密码错误');
+    }
+    const token = this.jwt.sign({ userId: user.id });
     return {
       token,
       userId: user.id,
