@@ -231,7 +231,7 @@ async function renderHome() {
 
 async function bindBaidu() {
   try {
-    const res = await api('/api/auth/baidu/auth-url?role=owner&redirect=/');
+    const res = await api('/api/auth/baidu/auth-url?role=owner&redirect=' + encodeURIComponent(location.href));
     location.href = res.authUrl;
   } catch (e) {
     toast('获取授权链接失败');
@@ -644,7 +644,7 @@ async function initPanSubmitTab() {
 
 async function bindBaiduForSubmit() {
   try {
-    const res = await api('/api/auth/baidu/auth-url?role=submitter&redirect=' + encodeURIComponent(location.hash));
+    const res = await api('/api/auth/baidu/auth-url?role=submitter&redirect=' + encodeURIComponent(location.href));
     location.href = res.authUrl;
   } catch (e) {
     toast('获取授权链接失败');
