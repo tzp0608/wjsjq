@@ -93,11 +93,12 @@ const routes = {
 
 function route() {
   const hash = location.hash;
-  const pageId = routes[hash] || 'page-login';
+  const hashPath = hash.split('?')[0];
+  const pageId = routes[hashPath] || 'page-login';
 
   // 需要登录的页面
   const authPages = ['#/home', '#/create', '#/task'];
-  if (authPages.includes(hash) && !isLoggedIn()) {
+  if (authPages.includes(hashPath) && !isLoggedIn()) {
     location.hash = '#/login';
     return;
   }
@@ -280,7 +281,7 @@ function renderCreate() {
       });
       const shareUrl = `${location.origin}${res.sharePath}`;
       // 自动复制到剪贴板
-      navigator.clipboard.writeText(shareUrl).catch(() => {});
+      copyToClipboard(shareUrl).catch(() => {});
 
       modal({
         title: '任务创建成功',
@@ -301,7 +302,7 @@ function renderCreate() {
         const copyBtn = document.getElementById('modal-copy-btn');
         if (copyBtn) {
           copyBtn.onclick = () => {
-            navigator.clipboard.writeText(shareUrl).then(() => {
+            copyToClipboard(shareUrl).then(() => {
               toast('链接已复制');
             }).catch(() => {
               toast('复制失败，请手动复制');
@@ -348,7 +349,7 @@ async function renderTask() {
       infoEl.innerHTML += `
         <div style="margin-top:12px;">
           <div class="share-link">${shareUrl}</div>
-          <button class="btn btn-default btn-small" onclick="navigator.clipboard.writeText('${shareUrl}');toast('链接已复制')">复制分享链接</button>
+          <button class="btn btn-default btn-small" onclick="copyToClipboard('${shareUrl}').then(()=>toast('链接已复制')).catch(()=>toast('复制失败'))">复制分享链接</button>
         </div>
       `;
     } catch (e) {
@@ -366,6 +367,15 @@ async function renderTask() {
       };
     }
 
+    // 查看网盘文件按钮
+    if (task.targetPath) {
+      infoEl.innerHTML += `
+        <div style="margin-top:12px;">
+          <button class="btn btn-default btn-small" onclick="previewPanFiles('${escapeHtml(task.targetPath)}')">📁 查看网盘接收文件夹</button>
+        </div>
+      `;
+    }
+
     // 提交记录
     const submissions = await api(`/api/tasks/${taskId}/submissions`);
     if (!submissions || submissions.length === 0) {
@@ -373,14 +383,25 @@ async function renderTask() {
       return;
     }
     subsEl.innerHTML = submissions.map((s) => `
-      <div class="file-item">
-        <div>
-          <div class="file-item-name">${escapeHtml(s.submitterName)}</div>
-          <div style="font-size:12px;color:#999;margin-top:2px;">${new Date(s.createdAt).toLocaleString()}</div>
+      <div style="border-bottom:1px solid var(--border);padding:12px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div>
+            <div style="font-weight:600;font-size:15px;">${escapeHtml(s.submitterName || '匿名')}</div>
+            <div style="font-size:12px;color:#999;">${new Date(s.createdAt).toLocaleString()}</div>
+          </div>
+          <span class="status-badge status-${s.status === 'success' ? 'success' : s.status === 'failed' ? 'failed' : 'processing'}">
+            ${s.status === 'success' ? '成功' : s.status === 'partial_success' ? '部分成功' : s.status === 'failed' ? '失败' : '处理中'}
+          </span>
         </div>
-        <span class="status-badge status-${s.status === 'success' ? 'success' : s.status === 'failed' ? 'failed' : 'processing'}">
-          ${s.status === 'success' ? '成功' : s.status === 'partial_success' ? '部分成功' : s.status === 'failed' ? '失败' : '处理中'}
-        </span>
+        ${(s.files || []).map((f) => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;padding-left:12px;font-size:14px;">
+            <span style="flex:1;word-break:break-all;">📄 ${escapeHtml(f.name)}</span>
+            <span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${(f.size / 1024 / 1024).toFixed(2)} MB</span>
+            <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;">
+              ${f.status === 'transferred' ? '已转存' : f.status === 'failed' ? '失败' : '处理中'}
+            </span>
+          </div>
+        `).join('')}
       </div>
     `).join('');
   } catch (e) {
@@ -549,6 +570,60 @@ function parseHashParams() {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// 可靠的复制到剪贴板（带 fallback）
+function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // fallback：创建临时 textarea
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    return Promise.resolve();
+  } catch (err) {
+    return Promise.reject(err);
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+// ========== Preview Pan Files ==========
+async function previewPanFiles(path) {
+  modal({
+    title: '📁 网盘文件预览',
+    bodyHtml: '<div id="pan-preview-list" style="max-height:300px;overflow-y:auto;"><p>加载中...</p></div>',
+    confirmText: '关闭',
+    showCancel: false,
+  });
+  try {
+    const data = await api(`/api/baidu/files?path=${encodeURIComponent(path)}`);
+    const listEl = document.getElementById('pan-preview-list');
+    if (!data.items || data.items.length === 0) {
+      listEl.innerHTML = '<p style="color:#999;text-align:center;padding:20px;">该目录下暂无文件</p>';
+      return;
+    }
+    listEl.innerHTML = data.items.map((item) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eee;">
+        <div style="display:flex;align-items:center;flex:1;min-width:0;">
+          <span style="margin-right:8px;font-size:18px;">${item.isDir ? '📁' : '📄'}</span>
+          <span style="word-break:break-all;font-size:14px;">${escapeHtml(item.name)}</span>
+        </div>
+        <span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">
+          ${item.isDir ? '文件夹' : (item.size / 1024 / 1024).toFixed(2) + ' MB'}
+        </span>
+      </div>
+    `).join('');
+  } catch (e) {
+    const listEl = document.getElementById('pan-preview-list');
+    if (listEl) listEl.innerHTML = `<p style="color:#ff4d4f;text-align:center;padding:20px;">加载失败：${escapeHtml(e.message || '请检查百度网盘是否已绑定')}</p>`;
+  }
 }
 
 // ========== Folder Picker ==========
