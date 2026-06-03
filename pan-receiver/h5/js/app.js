@@ -104,7 +104,7 @@ function route() {
   }
 
   // 提交页不需要登录（公开任务）
-  if (hash === '#/submit') {
+  if (hashPath === '#/submit') {
     showPage('page-submit');
     renderSubmit();
     return;
