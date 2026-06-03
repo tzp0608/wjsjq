@@ -137,13 +137,31 @@
           <label class="form-label">您的姓名（可选）</label>
           <input id="submit-name" class="form-input" type="text" placeholder="填写姓名方便识别">
         </div>
-        <div class="upload-zone" id="upload-zone">
-          <div>点击或拖拽文件到此处上传</div>
-          <div style="font-size:12px;color:#999;margin-top:8px;">支持多文件，单个不超过 500MB</div>
-          <input id="file-input" type="file" multiple>
+
+        <!-- 选项卡 -->
+        <div class="tab-bar" id="submit-tabs">
+          <div class="tab-item active" data-tab="local">📁 本地上传</div>
+          <div class="tab-item" data-tab="pan">☁️ 从网盘选择</div>
         </div>
-        <div id="file-list" class="file-list"></div>
-        <button id="btn-submit-files" class="btn btn-primary" style="margin-top:16px;">确认提交</button>
+
+        <!-- 本地上传 -->
+        <div id="tab-local">
+          <div class="upload-zone" id="upload-zone">
+            <div>点击或拖拽文件到此处上传</div>
+            <div style="font-size:12px;color:#999;margin-top:8px;">支持多文件，单个不超过 500MB</div>
+            <input id="file-input" type="file" multiple>
+          </div>
+          <div id="file-list" class="file-list"></div>
+          <button id="btn-submit-files" class="btn btn-primary" style="margin-top:16px;">确认提交</button>
+        </div>
+
+        <!-- 网盘选择 -->
+        <div id="tab-pan" class="hidden">
+          <div id="pan-bind-status"></div>
+          <div id="pan-file-browser" style="max-height:300px;overflow-y:auto;margin-top:12px;"></div>
+          <div id="pan-selected-info" style="font-size:13px;color:#666;margin-top:8px;"></div>
+          <button id="btn-submit-pan" class="btn btn-primary" style="margin-top:12px;">确认提交所选文件</button>
+        </div>
       </div>
       <div id="submit-status" class="card hidden"></div>
     </div>

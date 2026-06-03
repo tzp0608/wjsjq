@@ -409,18 +409,58 @@ async function renderTask() {
   }
 }
 
+// ========== Anonymous Login ==========
+async function ensureAnonymousLogin() {
+  if (localStorage.getItem('token')) return;
+  const username = `visitor_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const password = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  try {
+    await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+  } catch (e) {
+    // ignore
+  }
+  try {
+    const data = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('userId', data.userId);
+    localStorage.setItem('baiduBound', data.baiduBound);
+  } catch (e) {
+    console.error('Anonymous login failed', e);
+  }
+}
+
 // ========== Page: Submit (Public) ==========
 let selectedFiles = [];
+let selectedPanFiles = [];
+let currentSubmitTaskId = '';
+let currentSubmitCode = '';
 
 async function renderSubmit() {
   const params = parseHashParams();
   const taskId = params.taskId;
   const code = params.code;
+  currentSubmitTaskId = taskId;
+  currentSubmitCode = code;
 
   if (!taskId || !code) {
     document.getElementById('submit-content').innerHTML = '<div class="empty-state"><p>链接无效，缺少任务信息</p></div>';
     return;
   }
+
+  // 自动匿名登录（确保有 token）
+  await ensureAnonymousLogin();
+
+  // 重置状态
+  selectedFiles = [];
+  selectedPanFiles = [];
+  document.getElementById('file-list').innerHTML = '';
+  document.getElementById('submit-status').classList.add('hidden');
 
   // 加载任务信息
   try {
@@ -436,15 +476,20 @@ async function renderSubmit() {
     return;
   }
 
-  // 文件选择
+  // 绑定选项卡
+  bindSubmitTabs();
+
+  // ===== 本地上传区域 =====
   const uploadZone = document.getElementById('upload-zone');
   const fileInput = document.getElementById('file-input');
   const fileList = document.getElementById('file-list');
 
-  uploadZone.onclick = () => fileInput.click();
+  uploadZone.onclick = () => {
+    fileInput.value = '';
+    fileInput.click();
+  };
   fileInput.onchange = (e) => addFiles(e.target.files);
 
-  // 拖拽上传
   uploadZone.ondragover = (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); };
   uploadZone.ondragleave = () => uploadZone.classList.remove('dragover');
   uploadZone.ondrop = (e) => {
@@ -475,23 +520,13 @@ async function renderSubmit() {
     });
   }
 
-  // 提交
-  document.getElementById('btn-submit-files').onclick = async () => {
+  // 本地上传提交
+  const btnLocal = document.getElementById('btn-submit-files');
+  btnLocal.onclick = async () => {
     if (selectedFiles.length === 0) { toast('请先选择文件'); return; }
-
-    const token = localStorage.getItem('token');
-    if (!token) {
-      toast('请先登录');
-      setTimeout(() => (location.hash = '#/login'), 1000);
-      return;
-    }
-
-    const btn = document.getElementById('btn-submit-files');
+    btnLocal.disabled = true;
+    btnLocal.textContent = '创建提交单...';
     try {
-      btn.disabled = true;
-      btn.textContent = '创建提交单...';
-
-      // 1. 创建提交单
       const res = await api('/api/submissions', {
         method: 'POST',
         body: JSON.stringify({
@@ -500,16 +535,13 @@ async function renderSubmit() {
           files: selectedFiles.map((f) => ({ name: f.name, size: f.size, type: f.type })),
         }),
       });
-
       const submissionId = res.submissionId;
       const fileMap = {};
       for (const f of res.files || []) {
         const localFile = selectedFiles.find((lf) => lf.name === f.name);
         if (localFile) fileMap[localFile.name] = f.fileId;
       }
-
-      // 2. 上传文件
-      btn.textContent = '上传中...';
+      btnLocal.textContent = '上传中...';
       for (const f of selectedFiles) {
         const fileId = fileMap[f.name];
         if (!fileId) continue;
@@ -519,20 +551,182 @@ async function renderSubmit() {
         formData.append('taskId', taskId);
         await apiUpload(`/api/submissions/${submissionId}/upload`, formData);
       }
-
       toast('提交成功，正在处理...');
       selectedFiles = [];
       renderFileList();
-
-      // 3. 轮询状态
       pollSubmissionStatus(submissionId);
     } catch (e) {
       toast(e.message || '提交失败');
     } finally {
-      btn.disabled = false;
-      btn.textContent = '确认提交';
+      btnLocal.disabled = false;
+      btnLocal.textContent = '确认提交';
     }
   };
+
+  // ===== 网盘选择区域 =====
+  initPanSubmitTab();
+}
+
+function bindSubmitTabs() {
+  document.querySelectorAll('#submit-tabs .tab-item').forEach((tab) => {
+    tab.onclick = () => {
+      document.querySelectorAll('#submit-tabs .tab-item').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-local').classList.toggle('hidden', tab.dataset.tab !== 'local');
+      document.getElementById('tab-pan').classList.toggle('hidden', tab.dataset.tab !== 'pan');
+    };
+  });
+}
+
+async function initPanSubmitTab() {
+  const statusEl = document.getElementById('pan-bind-status');
+  const browserEl = document.getElementById('pan-file-browser');
+  const selectedInfo = document.getElementById('pan-selected-info');
+  const btnPan = document.getElementById('btn-submit-pan');
+  selectedPanFiles = [];
+  selectedInfo.textContent = '';
+  btnPan.textContent = '确认提交所选文件';
+
+  // 检查是否绑定网盘
+  try {
+    const me = await api('/api/auth/me');
+    if (!me.baiduBound) {
+      statusEl.innerHTML = `
+        <div style="text-align:center;padding:20px 0;">
+          <p style="color:#999;margin-bottom:12px;">未绑定百度网盘，无法从网盘选择文件</p>
+          <button class="btn btn-primary btn-small" onclick="bindBaiduForSubmit()">绑定百度网盘</button>
+        </div>
+      `;
+      browserEl.innerHTML = '';
+      btnPan.style.display = 'none';
+      return;
+    }
+  } catch (e) {
+    statusEl.innerHTML = '<p style="color:#999;text-align:center;">检查网盘状态失败</p>';
+    return;
+  }
+
+  statusEl.innerHTML = '';
+  btnPan.style.display = 'block';
+  loadPanFileBrowser('/', browserEl, selectedInfo);
+
+  btnPan.onclick = async () => {
+    if (selectedPanFiles.length === 0) { toast('请先在网盘中选择文件'); return; }
+    btnPan.disabled = true;
+    btnPan.textContent = '提交中...';
+    try {
+      const res = await api('/api/submissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          taskId: currentSubmitTaskId,
+          sourceType: 'baidu_pan_existing',
+          files: selectedPanFiles.map((f) => ({ name: f.name, size: f.size })),
+        }),
+      });
+      await api(`/api/submissions/${res.submissionId}/pan-files`, {
+        method: 'POST',
+        body: JSON.stringify({
+          selectedFiles: selectedPanFiles.map((f) => ({ fsId: f.fsId, path: f.path, name: f.name, size: f.size })),
+        }),
+      });
+      toast('提交成功，正在处理...');
+      selectedPanFiles = [];
+      selectedInfo.textContent = '';
+      pollSubmissionStatus(res.submissionId);
+    } catch (e) {
+      toast(e.message || '提交失败');
+    } finally {
+      btnPan.disabled = false;
+      btnPan.textContent = '确认提交所选文件';
+    }
+  };
+}
+
+async function bindBaiduForSubmit() {
+  try {
+    const res = await api('/api/auth/baidu/auth-url?role=submitter&redirect=' + encodeURIComponent(location.hash));
+    location.href = res.authUrl;
+  } catch (e) {
+    toast('获取授权链接失败');
+  }
+}
+
+async function loadPanFileBrowser(path, container, infoEl) {
+  container.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  try {
+    const data = await api(`/api/baidu/files?path=${encodeURIComponent(path)}`);
+    const items = data.items || [];
+    const folders = items.filter((i) => i.isDir);
+    const files = items.filter((i) => !i.isDir);
+
+    let html = '';
+    if (path !== '/' && path !== '') {
+      const parentPath = path.split('/').slice(0, -1).join('/') || '/';
+      html += `<div class="folder-item" onclick="loadPanFileBrowser('${escapeHtml(parentPath)}', document.getElementById('pan-file-browser'), document.getElementById('pan-selected-info'))"><span style="font-size:18px;margin-right:8px;">⬅️</span><span>返回上一级</span></div>`;
+    }
+    html += folders.map((f) => `
+      <div class="folder-item" onclick="loadPanFileBrowser('${escapeHtml(f.path)}', document.getElementById('pan-file-browser'), document.getElementById('pan-selected-info'))">
+        <span style="font-size:18px;margin-right:8px;">📁</span>
+        <span style="flex:1;">${escapeHtml(f.name)}</span>
+        <span style="color:#999;font-size:13px;">进入 ></span>
+      </div>
+    `).join('');
+    html += files.map((f) => {
+      const isSelected = selectedPanFiles.some((sf) => sf.fsId === f.fsId);
+      return `
+        <div class="folder-item" data-fsid="${f.fsId}" data-path="${escapeHtml(f.path)}" data-name="${escapeHtml(f.name)}" data-size="${f.size}">
+          <span style="font-size:18px;margin-right:8px;">📄</span>
+          <span style="flex:1;word-break:break-all;">${escapeHtml(f.name)}</span>
+          <span style="font-size:12px;color:#999;white-space:nowrap;margin-right:8px;">${(f.size / 1024 / 1024).toFixed(2)} MB</span>
+          <input type="checkbox" ${isSelected ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;">
+        </div>
+      `;
+    }).join('');
+
+    if (items.length === 0) {
+      html = '<div class="empty-state"><p style="font-size:14px;">该目录下没有文件</p></div>';
+    }
+
+    container.innerHTML = html;
+
+    // 绑定文件勾选事件
+    container.querySelectorAll('.folder-item input[type="checkbox"]').forEach((cb) => {
+      const row = cb.closest('.folder-item');
+      const fileData = {
+        fsId: row.dataset.fsid,
+        path: row.dataset.path,
+        name: row.dataset.name,
+        size: Number(row.dataset.size),
+      };
+      cb.onchange = () => {
+        if (cb.checked) {
+          if (!selectedPanFiles.some((f) => f.fsId === fileData.fsId)) {
+            selectedPanFiles.push(fileData);
+          }
+        } else {
+          selectedPanFiles = selectedPanFiles.filter((f) => f.fsId !== fileData.fsId);
+        }
+        updatePanSelectedInfo(infoEl);
+      };
+      // 点击整行也切换勾选
+      row.onclick = (e) => {
+        if (e.target === cb) return;
+        cb.checked = !cb.checked;
+        cb.onchange();
+      };
+    });
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state"><p>加载失败：${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function updatePanSelectedInfo(infoEl) {
+  if (selectedPanFiles.length === 0) {
+    infoEl.textContent = '';
+  } else {
+    const totalSize = selectedPanFiles.reduce((sum, f) => sum + f.size, 0);
+    infoEl.textContent = `已选择 ${selectedPanFiles.length} 个文件，共 ${(totalSize / 1024 / 1024).toFixed(2)} MB`;
+  }
 }
 
 async function pollSubmissionStatus(submissionId) {
