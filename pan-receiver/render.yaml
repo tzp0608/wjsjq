@@ -5,7 +5,7 @@ services:
     plan: free
     region: singapore
     buildCommand: cd pan-receiver/backend && cp prisma/schema.postgresql.prisma prisma/schema.prisma && PRISMA_GENERATE_SKIP_AUTO=true npm install --include=dev && DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder" npx prisma generate && npm run build
-    startCommand: cd pan-receiver/backend && npx prisma migrate deploy && node dist/main.js
+    startCommand: cd pan-receiver/backend && npx prisma db push --accept-data-loss && node dist/main.js
     envVars:
       - key: NODE_ENV
         value: production
