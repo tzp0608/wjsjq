@@ -38,7 +38,7 @@ export class TasksService {
 
     return {
       taskId: task.id,
-      sharePath: `/pages/submit/index?taskId=${task.id}&code=${shareCode}`,
+      sharePath: `/#/submit?taskId=${task.id}&code=${shareCode}`
     };
   }
 
@@ -124,7 +124,7 @@ export class TasksService {
 
     return {
       taskId: task.id,
-      sharePath: `/pages/submit/index?taskId=${task.id}&code=${shareCode}`,
+      sharePath: `/#/submit?taskId=${task.id}&code=${shareCode}`
     };
   }
 

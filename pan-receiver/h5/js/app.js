@@ -172,7 +172,35 @@ function renderLogin() {
 // ========== Page: Home ==========
 async function renderHome() {
   const listEl = document.getElementById('task-list');
+  const userEl = document.getElementById('user-info');
   listEl.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+
+  // 加载用户信息
+  let user = null;
+  try {
+    user = await api('/api/auth/me');
+    localStorage.setItem('baiduBound', user.baiduBound);
+    if (user.baiduBound) {
+      userEl.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:600;">${escapeHtml(user.baiduNickname || user.userId.slice(0, 8))}</div>
+            <div style="font-size:12px;color:#07c160;">已绑定百度网盘</div>
+          </div>
+          <button class="btn btn-default btn-small" onclick="unbindBaidu()">解绑</button>
+        </div>
+      `;
+    } else {
+      userEl.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="color:#999;font-size:14px;">未绑定百度网盘，文件无法自动转存</div>
+          <button class="btn btn-primary btn-small" onclick="bindBaidu()">绑定百度网盘</button>
+        </div>
+      `;
+    }
+  } catch (e) {
+    userEl.innerHTML = '';
+  }
 
   try {
     const tasks = await api('/api/tasks');
@@ -192,6 +220,26 @@ async function renderHome() {
     `).join('');
   } catch (e) {
     listEl.innerHTML = '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+  }
+}
+
+async function bindBaidu() {
+  try {
+    const res = await api('/api/auth/baidu/auth-url?role=owner&redirect=/');
+    location.href = res.authUrl;
+  } catch (e) {
+    toast('获取授权链接失败');
+  }
+}
+
+async function unbindBaidu() {
+  if (!confirm('确定解绑百度网盘？')) return;
+  try {
+    await api('/api/auth/baidu/unbind', { method: 'POST' });
+    toast('已解绑');
+    renderHome();
+  } catch (e) {
+    toast('解绑失败');
   }
 }
 
@@ -226,8 +274,8 @@ function renderCreate() {
         onConfirm: () => { location.hash = `#/task?taskId=${res.taskId}`; },
         showCancel: false,
       });
-      // 复制分享链接
-      const shareUrl = `${location.origin}${location.pathname}#/submit?taskId=${res.taskId}&code=${res.sharePath.split('code=')[1]}`;
+      // 复制分享链接（sharePath 已经是 /#/submit?taskId=...&code=... 格式）
+      const shareUrl = `${location.origin}${res.sharePath}`;
       navigator.clipboard.writeText(shareUrl).catch(() => {});
     } catch (e) {
       toast(e.message || '创建失败');
@@ -262,13 +310,17 @@ async function renderTask() {
     `;
 
     // 分享链接
-    const shareCode = localStorage.getItem(`share_${taskId}`) || '';
-    if (shareCode) {
-      const shareUrl = `${location.origin}${location.pathname}#/submit?taskId=${taskId}&code=${shareCode}`;
+    try {
+      const shareRes = await api(`/api/tasks/${taskId}/regenerate-share`, { method: 'POST' });
+      const shareUrl = `${location.origin}${shareRes.sharePath}`;
       infoEl.innerHTML += `
-        <div class="share-link">${shareUrl}</div>
-        <button class="btn btn-default btn-small" onclick="navigator.clipboard.writeText('${shareUrl}');toast('链接已复制')">复制分享链接</button>
+        <div style="margin-top:12px;">
+          <div class="share-link">${shareUrl}</div>
+          <button class="btn btn-default btn-small" onclick="navigator.clipboard.writeText('${shareUrl}');toast('链接已复制')">复制分享链接</button>
+        </div>
       `;
+    } catch (e) {
+      // 忽略分享链接获取失败
     }
 
     // 关闭任务按钮

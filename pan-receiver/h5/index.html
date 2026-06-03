@@ -51,11 +51,15 @@
 
   <!-- ========== Page: Home ========== -->
   <div id="page-home" class="page hidden">
-    <div class="header">
-      我的任务
-      <div class="sub">管理文件收集任务</div>
+    <div class="header" style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;">
+      <div style="text-align:center;flex:1;">
+        我的任务
+        <div class="sub">管理文件收集任务</div>
+      </div>
+      <div style="font-size:13px;cursor:pointer;" onclick="logout()">退出</div>
     </div>
     <div class="container">
+      <div id="user-info" class="card" style="padding:14px 20px;"></div>
       <div id="task-list"></div>
       <button class="btn btn-primary" onclick="location.hash='#/create'" style="margin-top:8px;">+ 创建新任务</button>
     </div>
