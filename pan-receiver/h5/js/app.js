@@ -43,10 +43,15 @@ function toast(msg) {
   setTimeout(() => el.classList.remove('show'), 2000);
 }
 
-function modal({ title, body, confirmText = '确定', onConfirm, showCancel = true }) {
+function modal({ title, body, bodyHtml, confirmText = '确定', onConfirm, showCancel = true }) {
   const overlay = document.getElementById('modal');
   document.getElementById('modal-title').textContent = title;
-  document.getElementById('modal-body').textContent = body;
+  const bodyEl = document.getElementById('modal-body');
+  if (bodyHtml) {
+    bodyEl.innerHTML = bodyHtml;
+  } else {
+    bodyEl.textContent = body || '';
+  }
   const btnConfirm = document.getElementById('modal-confirm');
   const btnCancel = document.getElementById('modal-cancel');
   btnConfirm.textContent = confirmText;
@@ -246,6 +251,13 @@ async function unbindBaidu() {
 // ========== Page: Create ==========
 function renderCreate() {
   const btn = document.getElementById('btn-create');
+  const pathInput = document.getElementById('create-path');
+
+  // 点击路径输入框打开网盘文件夹选择器
+  pathInput.onclick = () => openFolderPicker((selectedPath) => {
+    pathInput.value = selectedPath;
+  });
+
   btn.onclick = async () => {
     const title = document.getElementById('create-title').value.trim();
     const description = document.getElementById('create-desc').value.trim();
@@ -266,17 +278,37 @@ function renderCreate() {
           deadline: deadline ? `${deadline}T23:59:59+08:00` : undefined,
         }),
       });
-      toast('创建成功');
+      const shareUrl = `${location.origin}${res.sharePath}`;
+      // 自动复制到剪贴板
+      navigator.clipboard.writeText(shareUrl).catch(() => {});
+
       modal({
         title: '任务创建成功',
-        body: `分享链接已复制到剪贴板，可以发送给提交人。`,
-        confirmText: '去查看',
+        bodyHtml: `
+          <div style="text-align:center;">
+            <p style="color:#666;margin-bottom:16px;">分享链接已生成，点击复制发送给提交人</p>
+            <div style="background:#f5f5f5;padding:12px;border-radius:8px;font-size:13px;word-break:break-all;margin-bottom:16px;">${escapeHtml(shareUrl)}</div>
+            <button class="btn btn-primary" id="modal-copy-btn" style="margin-bottom:8px;">一键复制链接</button>
+            <p style="font-size:12px;color:#999;">链接已自动复制到剪贴板</p>
+          </div>
+        `,
+        confirmText: '去查看任务',
         onConfirm: () => { location.hash = `#/task?taskId=${res.taskId}`; },
         showCancel: false,
       });
-      // 复制分享链接（sharePath 已经是 /#/submit?taskId=...&code=... 格式）
-      const shareUrl = `${location.origin}${res.sharePath}`;
-      navigator.clipboard.writeText(shareUrl).catch(() => {});
+      // 绑定模态框内的一键复制按钮
+      setTimeout(() => {
+        const copyBtn = document.getElementById('modal-copy-btn');
+        if (copyBtn) {
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+              toast('链接已复制');
+            }).catch(() => {
+              toast('复制失败，请手动复制');
+            });
+          };
+        }
+      }, 0);
     } catch (e) {
       toast(e.message || '创建失败');
     } finally {
@@ -517,6 +549,76 @@ function parseHashParams() {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ========== Folder Picker ==========
+let folderPickerCallback = null;
+let folderPickerCurrentPath = '/';
+
+async function openFolderPicker(onSelect) {
+  folderPickerCallback = onSelect;
+  folderPickerCurrentPath = '/';
+  document.getElementById('folder-picker').classList.add('show');
+  await loadFolderList('/');
+}
+
+function closeFolderPicker() {
+  document.getElementById('folder-picker').classList.remove('show');
+  folderPickerCallback = null;
+}
+
+async function loadFolderList(path) {
+  const listEl = document.getElementById('folder-picker-list');
+  const breadcrumbEl = document.getElementById('folder-picker-breadcrumb');
+  listEl.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  breadcrumbEl.textContent = path || '/';
+
+  try {
+    const data = await api(`/api/baidu/files?path=${encodeURIComponent(path)}`);
+    const folders = data.items.filter((item) => item.isDir);
+
+    if (folders.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><p style="font-size:14px;">该目录下没有文件夹</p></div>';
+    } else {
+      listEl.innerHTML = folders.map((f) => `
+        <div class="folder-item" data-path="${escapeHtml(f.path)}">
+          <span style="font-size:18px;margin-right:8px;">📁</span>
+          <span style="flex:1;">${escapeHtml(f.name)}</span>
+          <span style="color:#999;font-size:13px;">进入 ></span>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('.folder-item').forEach((el) => {
+        el.onclick = () => {
+          folderPickerCurrentPath = el.dataset.path;
+          loadFolderList(el.dataset.path);
+        };
+      });
+    }
+
+    // 绑定"选择当前目录"按钮
+    document.getElementById('folder-picker-confirm').onclick = () => {
+      if (folderPickerCallback) {
+        folderPickerCallback(folderPickerCurrentPath);
+      }
+      closeFolderPicker();
+    };
+
+    // 如果不是根目录，添加返回上一级
+    if (path !== '/' && path !== '') {
+      const parentPath = path.split('/').slice(0, -1).join('/') || '/';
+      const backEl = document.createElement('div');
+      backEl.className = 'folder-item';
+      backEl.style.cssText = 'border-bottom:1px solid #e8e8e8;margin-bottom:8px;padding-bottom:8px;';
+      backEl.innerHTML = '<span style="font-size:18px;margin-right:8px;">⬅️</span><span>返回上一级</span>';
+      backEl.onclick = () => {
+        folderPickerCurrentPath = parentPath;
+        loadFolderList(parentPath);
+      };
+      listEl.insertBefore(backEl, listEl.firstChild);
+    }
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state"><p>加载失败：${escapeHtml(e.message)}</p></div>`;
+  }
 }
 
 // ========== Init ==========

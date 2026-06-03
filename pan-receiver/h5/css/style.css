@@ -297,5 +297,21 @@ body {
   margin: 12px 0;
 }
 
+/* Folder picker */
+.folder-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.folder-item:hover {
+  background: #f5f5f5;
+}
+.folder-item:active {
+  background: #e8e8e8;
+}
+
 /* Hidden */
 .hidden { display: none !important; }

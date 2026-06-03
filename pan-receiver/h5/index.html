@@ -23,6 +23,21 @@
     </div>
   </div>
 
+  <!-- Folder Picker Modal -->
+  <div id="folder-picker" class="modal-overlay">
+    <div class="modal-content" style="width:90%;max-width:420px;max-height:70vh;display:flex;flex-direction:column;">
+      <div class="modal-title">选择百度网盘文件夹</div>
+      <div id="folder-picker-breadcrumb" style="font-size:13px;color:#666;margin-bottom:8px;word-break:break-all;">/</div>
+      <div id="folder-picker-list" style="flex:1;overflow-y:auto;max-height:40vh;margin-bottom:12px;">
+        <div class="empty-state"><p>加载中...</p></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-default" onclick="closeFolderPicker()">取消</button>
+        <button class="btn btn-primary" id="folder-picker-confirm">选择当前目录</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ========== Page: Login ========== -->
   <div id="page-login" class="page">
     <div class="header">
@@ -82,8 +97,8 @@
           <textarea id="create-desc" class="form-textarea" placeholder="可选：说明需要提交的文件类型、格式要求等"></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label">接收目录（百度网盘路径）</label>
-          <input id="create-path" class="form-input" type="text" placeholder="例如：/接收的文件/项目资料" value="/接收的文件">
+          <label class="form-label">接收目录（点击选择百度网盘文件夹）</label>
+          <input id="create-path" class="form-input" type="text" placeholder="点击选择百度网盘文件夹" value="/接收的文件" readonly style="background:#f9f9f9;cursor:pointer;">
         </div>
         <div class="form-group">
           <label class="form-label">截止时间（可选）</label>
