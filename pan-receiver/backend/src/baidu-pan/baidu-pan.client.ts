@@ -109,6 +109,24 @@ export class BaiduPanClient {
     });
   }
 
+  async getFileMetaWithThumb(fsids: number[]) {
+    return this.get('https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas', {
+      fsids: `[${fsids.join(',')}]`,
+      thumb: 1,
+      dlink: 0,
+      extra: 1,
+    });
+  }
+
+  async getFileDlink(fsids: number[]) {
+    return this.get('https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas', {
+      fsids: `[${fsids.join(',')}]`,
+      thumb: 0,
+      dlink: 1,
+      extra: 0,
+    });
+  }
+
   async createShare(fsids: number[]) {
     return this.post('https://pan.baidu.com/rest/2.0/xpan/share?method=create', undefined, {
       fsid_list: `[${fsids.join(',')}]`,

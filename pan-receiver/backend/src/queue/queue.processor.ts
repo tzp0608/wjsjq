@@ -153,7 +153,7 @@ export class TransferProcessor extends WorkerHost {
 
       await this.prisma.submissionFile.update({
         where: { id: fileId },
-        data: { ownerTargetPath: ownerPath, transferStatus: 'transferred' },
+        data: { ownerTargetPath: `${ownerPath}/${fileRecord.fileName}`, transferStatus: 'transferred' },
       });
 
       await this.prisma.submission.update({

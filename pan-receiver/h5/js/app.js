@@ -396,7 +396,8 @@ async function renderTask() {
         ${(s.files || []).map((f) => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;padding-left:12px;font-size:14px;">
             <span style="flex:1;word-break:break-all;">📄 ${escapeHtml(f.name)}</span>
-            <span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${(f.size / 1024 / 1024).toFixed(2)} MB</span>
+            ${f.size ? `<span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${(f.size / 1024 / 1024).toFixed(2)} MB</span>` : ''}
+            ${f.status === 'transferred' && isImageFile(f.name) && f.path ? `<button class="btn btn-default btn-small" onclick="showImagePreview('${encodeURIComponent(f.path)}')" style="margin-left:8px;white-space:nowrap;">预览</button>` : ''}
             <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;">
               ${f.status === 'transferred' ? '已转存' : f.status === 'failed' ? '失败' : '处理中'}
             </span>
@@ -508,13 +509,17 @@ async function renderSubmit() {
 
   function renderFileList() {
     if (selectedFiles.length === 0) { fileList.innerHTML = ''; return; }
-    fileList.innerHTML = selectedFiles.map((f, i) => `
-      <div class="file-item">
-        <span class="file-item-name">${escapeHtml(f.name)}</span>
+    fileList.innerHTML = selectedFiles.map((f, i) => {
+      const thumb = isImageFile(f.name) ? `<img src="${URL.createObjectURL(f)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;margin-right:8px;flex-shrink:0;">` : `<span style="font-size:24px;margin-right:8px;">📄</span>`;
+      return `
+      <div class="file-item" style="align-items:center;">
+        ${thumb}
+        <span class="file-item-name" style="flex:1;word-break:break-all;">${escapeHtml(f.name)}</span>
         <span class="file-item-size">${(f.size / 1024 / 1024).toFixed(2)} MB</span>
         <span class="file-item-remove" data-index="${i}">删除</span>
       </div>
-    `).join('');
+    `;
+    }).join('');
     fileList.querySelectorAll('.file-item-remove').forEach((el) => {
       el.onclick = () => { selectedFiles.splice(Number(el.dataset.index), 1); renderFileList(); };
     });
@@ -536,20 +541,41 @@ async function renderSubmit() {
         }),
       });
       const submissionId = res.submissionId;
+      // 建立文件名到 fileId 的映射，注意处理同名文件
       const fileMap = {};
+      const usedFileIds = new Set();
       for (const f of res.files || []) {
-        const localFile = selectedFiles.find((lf) => lf.name === f.name);
-        if (localFile) fileMap[localFile.name] = f.fileId;
+        if (!fileMap[f.name]) {
+          fileMap[f.name] = f.fileId;
+          usedFileIds.add(f.fileId);
+        }
       }
       btnLocal.textContent = '上传中...';
-      for (const f of selectedFiles) {
+      let uploadedCount = 0;
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const f = selectedFiles[i];
         const fileId = fileMap[f.name];
-        if (!fileId) continue;
-        const formData = new FormData();
-        formData.append('file', f);
-        formData.append('fileId', fileId);
-        formData.append('taskId', taskId);
-        await apiUpload(`/api/submissions/${submissionId}/upload`, formData);
+        if (!fileId) {
+          console.warn('No fileId for', f.name);
+          continue;
+        }
+        try {
+          const formData = new FormData();
+          formData.append('file', f);
+          formData.append('fileId', fileId);
+          formData.append('taskId', taskId);
+          await apiUpload(`/api/submissions/${submissionId}/upload`, formData);
+          uploadedCount++;
+        } catch (uploadErr) {
+          console.error('Upload failed for', f.name, uploadErr);
+          toast(`文件 ${f.name} 上传失败: ${uploadErr.message || '未知错误'}`);
+        }
+      }
+      if (uploadedCount === 0) {
+        toast('所有文件上传失败，请重试');
+        btnLocal.disabled = false;
+        btnLocal.textContent = '确认提交';
+        return;
       }
       toast('提交成功，正在处理...');
       selectedFiles = [];
@@ -805,9 +831,10 @@ async function previewPanFiles(path) {
     }
     listEl.innerHTML = data.items.map((item) => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eee;">
-        <div style="display:flex;align-items:center;flex:1;min-width:0;">
-          <span style="margin-right:8px;font-size:18px;">${item.isDir ? '📁' : '📄'}</span>
-          <span style="word-break:break-all;font-size:14px;">${escapeHtml(item.name)}</span>
+        <div style="display:flex;align-items:center;flex:1;min-width:0;gap:8px;">
+          <span style="font-size:18px;">${item.isDir ? '📁' : '📄'}</span>
+          <span style="word-break:break-all;font-size:14px;flex:1;">${escapeHtml(item.name)}</span>
+          ${!item.isDir && isImageFile(item.name) ? `<button class="btn btn-default btn-small" onclick="showImagePreview('${encodeURIComponent(item.path)}')" style="white-space:nowrap;">预览</button>` : ''}
         </div>
         <span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">
           ${item.isDir ? '文件夹' : (item.size / 1024 / 1024).toFixed(2) + ' MB'}
@@ -817,6 +844,43 @@ async function previewPanFiles(path) {
   } catch (e) {
     const listEl = document.getElementById('pan-preview-list');
     if (listEl) listEl.innerHTML = `<p style="color:#ff4d4f;text-align:center;padding:20px;">加载失败：${escapeHtml(e.message || '请检查百度网盘是否已绑定')}</p>`;
+  }
+}
+
+function isImageFile(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'heic'].includes(ext);
+}
+
+async function showImagePreview(filePath) {
+  modal({
+    title: '🖼️ 图片预览',
+    bodyHtml: '<div style="text-align:center;"><img id="preview-img" src="" style="max-width:100%;max-height:60vh;border-radius:8px;" alt="预览"><p id="preview-loading" style="color:#999;padding:40px;">加载中...</p></div>',
+    confirmText: '关闭',
+    showCancel: false,
+  });
+  try {
+    const data = await api(`/api/baidu/file-preview?path=${encodeURIComponent(decodeURIComponent(filePath))}`);
+    const img = document.getElementById('preview-img');
+    const loading = document.getElementById('preview-loading');
+    if (loading) loading.style.display = 'none';
+    if (data.thumb) {
+      img.src = data.thumb;
+    } else {
+      img.style.display = 'none';
+      if (loading) {
+        loading.style.display = 'block';
+        loading.textContent = '无法获取图片预览';
+      }
+    }
+  } catch (e) {
+    const img = document.getElementById('preview-img');
+    const loading = document.getElementById('preview-loading');
+    if (img) img.style.display = 'none';
+    if (loading) {
+      loading.style.display = 'block';
+      loading.textContent = '加载失败：' + (e.message || '未知错误');
+    }
   }
 }
 

@@ -148,7 +148,7 @@ export class TasksService {
       successCount: s.successCount,
       failedCount: s.failedCount,
       createdAt: s.createdAt.toISOString(),
-      files: s.files.map((f) => ({ name: f.fileName, status: f.transferStatus })),
+      files: s.files.map((f) => ({ name: f.fileName, size: Number(f.fileSize), status: f.transferStatus, path: f.ownerTargetPath || null })),
     }));
   }
 

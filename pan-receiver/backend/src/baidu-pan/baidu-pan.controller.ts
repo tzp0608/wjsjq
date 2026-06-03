@@ -33,6 +33,36 @@ export class BaiduPanController {
     }
   }
 
+  @Get('file-preview')
+  @UseGuards(AuthGuard('jwt'))
+  async getFilePreview(@Req() req: any, @Query('path') filePath: string) {
+    try {
+      const client = await this.baiduPan.getClient(req.user.userId);
+      const dirPath = filePath.split('/').slice(0, -1).join('/') || '/';
+      const fileName = filePath.split('/').pop();
+      const items = await client.listFiles(dirPath);
+      const file = items.find((i: any) => i.server_filename === fileName);
+      if (!file) throw new BadRequestException('文件不存在');
+
+      const meta = await client.getFileMetaWithThumb([file.fs_id]);
+      const info = meta.list?.[0];
+
+      return {
+        name: file.server_filename,
+        path: file.path,
+        size: file.size,
+        fsId: String(file.fs_id),
+        thumb: info?.thumbs?.url2 || info?.thumbs?.url1 || info?.thumbs?.url3 || '',
+        isImage: [1, 2, 3].includes(file.category),
+      };
+    } catch (e: any) {
+      if (e.message?.includes('Baidu account not bound')) {
+        throw new BadRequestException('百度网盘未绑定');
+      }
+      throw e;
+    }
+  }
+
   @Post('folders')
   @UseGuards(AuthGuard('jwt'))
   async createFolder(@Req() req: any, @Body('path') path: string) {
