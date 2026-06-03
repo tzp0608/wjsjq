@@ -145,7 +145,7 @@ model AuditLog {
   action    String   @map("action")
   targetType String? @map("target_type")
   targetId  String?  @map("target_id")
-  metadata  Json?    @map("metadata")
+  metadata  String?  @map("metadata")
   ip        String?  @map("ip")
   userAgent String?  @map("user_agent")
   createdAt DateTime @default(now()) @map("created_at")
