@@ -4,8 +4,8 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: cd backend && cp prisma/schema.postgresql.prisma prisma/schema.prisma && npm install --include=dev && npm run build && npx prisma generate && npx prisma migrate deploy
-    startCommand: cd backend && node dist/main.js
+    buildCommand: cd backend && cp prisma/schema.postgresql.prisma prisma/schema.prisma && npm install --include=dev && npx prisma generate && npm run build
+    startCommand: cd backend && npx prisma migrate deploy && node dist/main.js
     envVars:
       - key: NODE_ENV
         value: production
