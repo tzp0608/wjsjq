@@ -32,13 +32,21 @@ export class LocalQueueService {
   private async handleUpload(data: UploadJobData) {
     const { fileId, localPath, submitterUserId, taskId } = data;
     const fileRecord = await this.prisma.submissionFile.findUnique({ where: { id: fileId } });
-    if (!fileRecord) return;
+    if (!fileRecord) {
+      this.logger.warn(`[Upload] File record not found: ${fileId}`);
+      return;
+    }
+
+    this.logger.log(`[Upload] Starting upload for ${fileRecord.fileName} (${fileId}) to ${submitterUserId}'s Baidu Pan`);
 
     try {
       const client = await this.baiduPan.getClient(submitterUserId);
       const panPath = `/apps/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      this.logger.log(`[Upload] Ensuring folder: ${path.dirname(panPath)}`);
       await client.ensureFolder(path.dirname(panPath));
+      this.logger.log(`[Upload] Uploading ${localPath} -> ${panPath}`);
       await client.uploadFile(localPath, panPath);
+      this.logger.log(`[Upload] Upload complete for ${fileId}`);
 
       await this.prisma.submissionFile.update({
         where: { id: fileId },
@@ -49,6 +57,7 @@ export class LocalQueueService {
 
       await this.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
     } catch (err: any) {
+      this.logger.error(`[Upload] Failed for ${fileId}: ${err.message}`, err.stack);
       await this.prisma.submissionFile.update({
         where: { id: fileId },
         data: { transferStatus: 'failed', errorMessage: err.message },
