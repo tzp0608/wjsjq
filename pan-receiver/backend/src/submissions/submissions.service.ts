@@ -142,22 +142,44 @@ export class SubmissionsService {
     if (!submission) throw new NotFoundException('Submission not found');
     if (submission.submitterUserId !== userId) throw new ForbiddenException();
 
-    for (const f of selectedFiles) {
-      await this.prisma.submissionFile.create({
-        data: {
-          submissionId,
-          taskId: submission.taskId,
-          submitterUserId: userId,
-          ownerUserId: submission.task.ownerUserId,
-          fileName: f.name,
-          fileSize: f.size,
-          fileExt: f.name.split('.').pop(),
-          sourceType: 'baidu_pan_existing',
-          submitterPanPath: f.path,
-          submitterPanFsId: f.fsId,
-          transferStatus: 'selected',
-        },
-      });
+    // 更新已有的 SubmissionFile 记录（createSubmission 已创建），而不是新建
+    const existingFiles = await this.prisma.submissionFile.findMany({
+      where: { submissionId },
+    });
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const f = selectedFiles[i];
+      const existing = existingFiles[i];
+      if (existing) {
+        await this.prisma.submissionFile.update({
+          where: { id: existing.id },
+          data: {
+            fileName: f.name,
+            fileSize: f.size,
+            fileExt: f.name.split('.').pop(),
+            sourceType: 'baidu_pan_existing',
+            submitterPanPath: f.path,
+            submitterPanFsId: f.fsId,
+            transferStatus: 'selected',
+          },
+        });
+      } else {
+        await this.prisma.submissionFile.create({
+          data: {
+            submissionId,
+            taskId: submission.taskId,
+            submitterUserId: userId,
+            ownerUserId: submission.task.ownerUserId,
+            fileName: f.name,
+            fileSize: f.size,
+            fileExt: f.name.split('.').pop(),
+            sourceType: 'baidu_pan_existing',
+            submitterPanPath: f.path,
+            submitterPanFsId: f.fsId,
+            transferStatus: 'selected',
+          },
+        });
+      }
     }
 
     await this.queue.addShareJob({
