@@ -66,13 +66,29 @@ export class BaiduPanClient {
     return (res.list || []) as BaiduFileItem[];
   }
 
-  async createFolder(path: string) {
+  async createFolder(targetPath: string) {
     return this.post('https://pan.baidu.com/rest/2.0/xpan/file?method=create', undefined, {
-      path,
+      path: targetPath,
       size: 0,
       isdir: 1,
       rtype: 1,
     });
+  }
+
+  async ensureFolder(targetPath: string) {
+    const parts = targetPath.split('/').filter(Boolean);
+    let current = '';
+    for (const part of parts) {
+      current += '/' + part;
+      try {
+        await this.createFolder(current);
+      } catch (e: any) {
+        // -8 = file already exists, ignore
+        if (e.errno !== -8 && !e.message?.includes('file exist')) {
+          throw e;
+        }
+      }
+    }
   }
 
   async uploadFile(localPath: string, remotePath: string) {
@@ -81,7 +97,8 @@ export class BaiduPanClient {
     const form = new FormData();
     form.append('file', fileData, { filename: remotePath.split('/').pop() });
 
-    const uploadUrl = 'https://d.pcs.baidu.com/rest/2.0/pcs/file';
+    // 百度网盘 PCS 上传使用 pcs.baidu.com（d.pcs.baidu.com 是下载域名）
+    const uploadUrl = 'https://pcs.baidu.com/rest/2.0/pcs/file';
     const { data: res } = await axios.post(uploadUrl, form, {
       params: {
         method: 'upload',

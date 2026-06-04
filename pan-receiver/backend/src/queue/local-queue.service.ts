@@ -37,7 +37,7 @@ export class LocalQueueService {
     try {
       const client = await this.baiduPan.getClient(submitterUserId);
       const panPath = `/apps/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
-      await client.createFolder(path.dirname(panPath));
+      await client.ensureFolder(path.dirname(panPath));
       await client.uploadFile(localPath, panPath);
 
       await this.prisma.submissionFile.update({
