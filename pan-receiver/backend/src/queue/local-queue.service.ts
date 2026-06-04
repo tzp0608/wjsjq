@@ -40,6 +40,13 @@ export class LocalQueueService {
     this.logger.log(`[Upload] Starting upload for ${fileRecord.fileName} (${fileId}) to ${submitterUserId}'s Baidu Pan`);
 
     try {
+      // 标记为正在上传到百度网盘
+      await this.prisma.submissionFile.update({
+        where: { id: fileId },
+        data: { transferStatus: 'uploading' },
+      });
+      await this.updateSubmissionStatus(fileRecord.submissionId);
+
       const client = await this.baiduPan.getClient(submitterUserId);
       const panPath = `/apps/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
       this.logger.log(`[Upload] Ensuring folder: ${path.dirname(panPath)}`);
@@ -52,15 +59,17 @@ export class LocalQueueService {
         where: { id: fileId },
         data: { submitterPanPath: panPath, transferStatus: 'uploaded_to_pan' },
       });
+      await this.updateSubmissionStatus(fileRecord.submissionId);
 
       try { fs.unlinkSync(localPath); } catch (_) {}
 
       await this.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
     } catch (err: any) {
-      this.logger.error(`[Upload] Failed for ${fileId}: ${err.message}`, err.stack);
+      const errMsg = err.errno ? `errno=${err.errno} ${err.message}` : err.message;
+      this.logger.error(`[Upload] Failed for ${fileId}: ${errMsg}`, err.stack);
       await this.prisma.submissionFile.update({
         where: { id: fileId },
-        data: { transferStatus: 'failed', errorMessage: err.message },
+        data: { transferStatus: 'failed', errorMessage: errMsg },
       });
       await this.updateSubmissionStatus(fileRecord.submissionId);
     }
@@ -71,7 +80,19 @@ export class LocalQueueService {
     const files = await this.prisma.submissionFile.findMany({
       where: { submissionId, transferStatus: { in: ['uploaded_to_pan', 'selected'] } },
     });
-    if (files.length === 0) return;
+    if (files.length === 0) {
+      this.logger.warn(`[Share] No files ready for submission ${submissionId}`);
+      return;
+    }
+
+    // 标记为正在创建分享
+    for (const f of files) {
+      await this.prisma.submissionFile.update({
+        where: { id: f.id },
+        data: { transferStatus: 'creating_share' },
+      });
+    }
+    await this.updateSubmissionStatus(submissionId);
 
     try {
       const client = await this.baiduPan.getClient(submitterUserId);
@@ -174,7 +195,7 @@ export class LocalQueueService {
     const files = await this.prisma.submissionFile.findMany({ where: { submissionId } });
     if (files.length === 0) return;
 
-    const doneStatuses = ['shared', 'transferred', 'failed', 'waiting_owner_space', 'uploaded_to_server'];
+    const doneStatuses = ['shared', 'transferred', 'failed', 'waiting_owner_space'];
     const allDone = files.every((f) => doneStatuses.includes(f.transferStatus));
 
     const successCount = files.filter((f) => f.transferStatus === 'shared' || f.transferStatus === 'transferred').length;

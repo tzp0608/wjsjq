@@ -399,15 +399,15 @@ async function renderTask() {
         ${(s.files || []).map((f) => {
           const sizeNum = typeof f.size === 'number' && !isNaN(f.size) ? f.size : (parseInt(f.size, 10) || 0);
           const sizeText = sizeNum > 0 ? `${(sizeNum / 1024 / 1024).toFixed(2)} MB` : '';
-          const statusLabel = f.status === 'transferred' ? '已转存' : f.status === 'shared' ? '已分享' : f.status === 'failed' ? '失败' : '处理中';
+          const statusLabels = { 'selected':'待处理','uploaded_to_server':'已存服务器','uploading':'上传中','uploaded_to_pan':'已上传网盘','creating_share':'创建分享','shared':'已分享','transferred':'已转存','failed':'失败' };
+          const statusLabel = statusLabels[f.status] || f.status;
+          const badgeClass = f.status === 'shared' || f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing';
           return `
           <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;padding-left:12px;font-size:14px;flex-wrap:wrap;">
             <span style="flex:1;word-break:break-all;min-width:0;">📄 ${escapeHtml(f.name)}</span>
             ${sizeText ? `<span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${sizeText}</span>` : ''}
             ${f.status === 'transferred' && isImageFile(f.name) && f.path ? `<button class="btn btn-default btn-small" onclick="showImagePreview('${encodeURIComponent(f.path)}')" style="margin-left:8px;white-space:nowrap;">预览</button>` : ''}
-            <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'shared' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;">
-              ${statusLabel}
-            </span>
+            <span class="status-badge status-${badgeClass}" style="margin-left:8px;font-size:11px;padding:2px 8px;">${statusLabel}</span>
             ${f.status === 'shared' && f.shareUrl ? `<button class="btn btn-default btn-small" onclick="copyShareLink('${f.shareUrl}', this)" style="margin-left:4px;white-space:nowrap;">复制链接</button>` : ''}
             ${f.status === 'failed' && f.errorMessage ? `<div style="width:100%;font-size:12px;color:#ff4d4f;margin-top:4px;padding-left:24px;">错误：${escapeHtml(f.errorMessage)}</div>` : ''}
           </div>
@@ -800,31 +800,74 @@ async function pollSubmissionStatus(submissionId) {
   const statusEl = document.getElementById('submit-status');
   statusEl.classList.remove('hidden');
 
+  const statusLabels = {
+    'selected': '待处理',
+    'uploaded_to_server': '已存服务器',
+    'uploading': '上传中',
+    'uploaded_to_pan': '已上传网盘',
+    'creating_share': '创建分享',
+    'shared': '已分享',
+    'transferred': '已转存',
+    'failed': '失败',
+  };
+
+  let pollCount = 0;
+  const maxPolls = 100;
+
   const timer = setInterval(async () => {
+    pollCount++;
+    if (pollCount > maxPolls) {
+      clearInterval(timer);
+      statusEl.innerHTML = '<div class="card-title">提交状态</div><p style="color:#ff4d4f;">轮询超时，请刷新页面查看任务详情</p>';
+      return;
+    }
+
     try {
       const status = await api(`/api/submissions/${submissionId}/status`);
+
+      // 统计每个状态的文件数
+      const summary = {};
+      (status.files || []).forEach((f) => {
+        summary[f.status] = (summary[f.status] || 0) + 1;
+      });
+      const summaryText = Object.entries(summary)
+        .map(([st, cnt]) => `${statusLabels[st] || st}(${cnt})`)
+        .join(', ');
+
       const fileDetails = (status.files || []).map((f) => {
-        const errText = f.status === 'failed' && f.errorMessage ? `<span style="color:#ff4d4f;font-size:12px;">${escapeHtml(f.errorMessage)}</span>` : '';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;">
-          <span style="flex:1;word-break:break-all;">${escapeHtml(f.name)}</span>
-          <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;white-space:nowrap;">
-            ${f.status === 'transferred' ? '已转存' : f.status === 'failed' ? '失败' : '处理中'}
-          </span>
-        </div>${errText}`;
+        const label = statusLabels[f.status] || f.status;
+        const badgeClass = f.status === 'shared' || f.status === 'transferred' ? 'success' :
+                           f.status === 'failed' ? 'failed' : 'processing';
+        const errText = f.status === 'failed' && f.errorMessage ?
+          `<div style="width:100%;font-size:12px;color:#ff4d4f;margin-top:2px;padding-left:24px;">${escapeHtml(f.errorMessage)}</div>` : '';
+        return `<div style="display:flex;flex-wrap:wrap;align-items:center;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5;">
+          <span style="flex:1;word-break:break-all;min-width:0;">📄 ${escapeHtml(f.name)}</span>
+          <span class="status-badge status-${badgeClass}" style="margin-left:8px;font-size:11px;padding:2px 8px;white-space:nowrap;">${label}</span>
+          ${errText}
+        </div>`;
       }).join('');
+
+      const globalLabels = {
+        'processing': '处理中',
+        'success': '全部成功',
+        'partial_success': '部分成功',
+        'failed': '失败',
+      };
+
       statusEl.innerHTML = `
-        <div class="card-title">提交状态</div>
-        <p>状态：<span class="status-badge status-${status.status === 'success' ? 'success' : status.status === 'partial_success' ? 'partial' : status.status === 'failed' ? 'failed' : 'processing'}">
-          ${status.status === 'success' ? '成功' : status.status === 'partial_success' ? '部分成功' : status.status === 'failed' ? '失败' : '处理中'}
+        <div class="card-title">提交状态 (轮询 #${pollCount})</div>
+        <p>总体：<span class="status-badge status-${status.status === 'success' ? 'success' : status.status === 'failed' ? 'failed' : 'processing'}">
+          ${globalLabels[status.status] || status.status}
         </span></p>
-        <p>文件：${status.successCount}/${status.fileCount} 成功</p>
-        ${fileDetails ? `<div style="margin-top:8px;border-top:1px solid #eee;padding-top:8px;">${fileDetails}</div>` : ''}
+        <p style="font-size:13px;color:#666;">概况：${summaryText || '暂无'}</p>
+        <div style="margin-top:8px;">${fileDetails}</div>
       `;
+
       if (['success', 'partial_success', 'failed'].includes(status.status)) {
         clearInterval(timer);
       }
     } catch (e) {
-      clearInterval(timer);
+      statusEl.innerHTML += `<p style="color:#ff4d4f;font-size:12px;">轮询出错：${escapeHtml(e.message || '未知错误')}</p>`;
     }
   }, 3000);
 }
