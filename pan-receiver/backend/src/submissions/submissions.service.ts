@@ -185,7 +185,9 @@ export class SubmissionsService {
       files: submission.files.map((f) => ({
         fileId: f.id,
         name: f.fileName,
+        size: typeof f.fileSize === 'bigint' ? Number(f.fileSize) : (f.fileSize || 0),
         status: f.transferStatus,
+        errorMessage: f.errorMessage || null,
       })),
     };
   }

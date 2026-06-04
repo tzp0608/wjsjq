@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   UseGuards,
   Req,
   UploadedFile,
@@ -43,9 +44,9 @@ export class SubmissionsController {
   uploadFile(
     @Req() req: any,
     @Param('submissionId') submissionId: string,
+    @Query('fileId') fileId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    const fileId = req.body?.fileId || '';
     return this.submissions.uploadFile(submissionId, req.user.userId, file, fileId);
   }
 

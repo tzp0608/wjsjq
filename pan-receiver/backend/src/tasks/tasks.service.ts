@@ -148,7 +148,13 @@ export class TasksService {
       successCount: s.successCount,
       failedCount: s.failedCount,
       createdAt: s.createdAt.toISOString(),
-      files: s.files.map((f) => ({ name: f.fileName, size: Number(f.fileSize), status: f.transferStatus, path: f.ownerTargetPath || null })),
+      files: s.files.map((f) => ({
+        name: f.fileName,
+        size: typeof f.fileSize === 'bigint' ? Number(f.fileSize) : (f.fileSize || 0),
+        status: f.transferStatus,
+        path: f.ownerTargetPath || null,
+        errorMessage: f.errorMessage || null,
+      })),
     }));
   }
 

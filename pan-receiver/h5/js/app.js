@@ -393,16 +393,21 @@ async function renderTask() {
             ${s.status === 'success' ? '成功' : s.status === 'partial_success' ? '部分成功' : s.status === 'failed' ? '失败' : '处理中'}
           </span>
         </div>
-        ${(s.files || []).map((f) => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;padding-left:12px;font-size:14px;">
-            <span style="flex:1;word-break:break-all;">📄 ${escapeHtml(f.name)}</span>
-            ${f.size ? `<span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${(f.size / 1024 / 1024).toFixed(2)} MB</span>` : ''}
+        ${(s.files || []).map((f) => {
+          const sizeNum = typeof f.size === 'number' && !isNaN(f.size) ? f.size : (parseInt(f.size, 10) || 0);
+          const sizeText = sizeNum > 0 ? `${(sizeNum / 1024 / 1024).toFixed(2)} MB` : '';
+          return `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;padding-left:12px;font-size:14px;flex-wrap:wrap;">
+            <span style="flex:1;word-break:break-all;min-width:0;">📄 ${escapeHtml(f.name)}</span>
+            ${sizeText ? `<span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${sizeText}</span>` : ''}
             ${f.status === 'transferred' && isImageFile(f.name) && f.path ? `<button class="btn btn-default btn-small" onclick="showImagePreview('${encodeURIComponent(f.path)}')" style="margin-left:8px;white-space:nowrap;">预览</button>` : ''}
             <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;">
               ${f.status === 'transferred' ? '已转存' : f.status === 'failed' ? '失败' : '处理中'}
             </span>
+            ${f.status === 'failed' && f.errorMessage ? `<div style="width:100%;font-size:12px;color:#ff4d4f;margin-top:4px;padding-left:24px;">错误：${escapeHtml(f.errorMessage)}</div>` : ''}
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     `).join('');
   } catch (e) {
@@ -564,7 +569,7 @@ async function renderSubmit() {
           formData.append('file', f);
           formData.append('fileId', fileId);
           formData.append('taskId', taskId);
-          await apiUpload(`/api/submissions/${submissionId}/upload`, formData);
+          await apiUpload(`/api/submissions/${submissionId}/upload?fileId=${encodeURIComponent(fileId)}`, formData);
           uploadedCount++;
         } catch (uploadErr) {
           console.error('Upload failed for', f.name, uploadErr);
@@ -762,12 +767,22 @@ async function pollSubmissionStatus(submissionId) {
   const timer = setInterval(async () => {
     try {
       const status = await api(`/api/submissions/${submissionId}/status`);
+      const fileDetails = (status.files || []).map((f) => {
+        const errText = f.status === 'failed' && f.errorMessage ? `<span style="color:#ff4d4f;font-size:12px;">${escapeHtml(f.errorMessage)}</span>` : '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;">
+          <span style="flex:1;word-break:break-all;">${escapeHtml(f.name)}</span>
+          <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;white-space:nowrap;">
+            ${f.status === 'transferred' ? '已转存' : f.status === 'failed' ? '失败' : '处理中'}
+          </span>
+        </div>${errText}`;
+      }).join('');
       statusEl.innerHTML = `
         <div class="card-title">提交状态</div>
         <p>状态：<span class="status-badge status-${status.status === 'success' ? 'success' : status.status === 'partial_success' ? 'partial' : status.status === 'failed' ? 'failed' : 'processing'}">
           ${status.status === 'success' ? '成功' : status.status === 'partial_success' ? '部分成功' : status.status === 'failed' ? '失败' : '处理中'}
         </span></p>
         <p>文件：${status.successCount}/${status.fileCount} 成功</p>
+        ${fileDetails ? `<div style="margin-top:8px;border-top:1px solid #eee;padding-top:8px;">${fileDetails}</div>` : ''}
       `;
       if (['success', 'partial_success', 'failed'].includes(status.status)) {
         clearInterval(timer);
