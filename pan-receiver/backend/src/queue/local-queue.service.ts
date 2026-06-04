@@ -53,7 +53,7 @@ export class LocalQueueService {
         data: { submitterPanPath: panPath, transferStatus: 'uploaded_to_pan' },
       });
 
-      fs.unlinkSync(localPath);
+      try { fs.unlinkSync(localPath); } catch (_) {}
 
       await this.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
     } catch (err: any) {
@@ -62,6 +62,7 @@ export class LocalQueueService {
         where: { id: fileId },
         data: { transferStatus: 'failed', errorMessage: err.message },
       });
+      await this.updateSubmissionStatus(fileRecord.submissionId);
     }
   }
 
@@ -114,6 +115,7 @@ export class LocalQueueService {
           data: { transferStatus: 'failed', errorMessage: err.message },
         });
       }
+      await this.updateSubmissionStatus(submissionId);
     }
   }
 
@@ -170,21 +172,24 @@ export class LocalQueueService {
 
   private async updateSubmissionStatus(submissionId: string) {
     const files = await this.prisma.submissionFile.findMany({ where: { submissionId } });
-    const allDone = files.every((f) =>
-      ['shared', 'transferred', 'failed', 'waiting_owner_space'].includes(f.transferStatus),
-    );
-    if (!allDone) return;
+    if (files.length === 0) return;
+
+    const doneStatuses = ['shared', 'transferred', 'failed', 'waiting_owner_space', 'uploaded_to_server'];
+    const allDone = files.every((f) => doneStatuses.includes(f.transferStatus));
 
     const successCount = files.filter((f) => f.transferStatus === 'shared' || f.transferStatus === 'transferred').length;
     const failedCount = files.filter((f) => f.transferStatus === 'failed').length;
 
-    let status = 'success';
-    if (successCount > 0 && failedCount > 0) status = 'partial_success';
-    if (successCount === 0 && failedCount > 0) status = 'failed';
+    let status = 'processing';
+    if (allDone && successCount > 0 && failedCount === 0) status = 'success';
+    if (allDone && successCount > 0 && failedCount > 0) status = 'partial_success';
+    if (allDone && successCount === 0 && failedCount > 0) status = 'failed';
 
     await this.prisma.submission.update({
       where: { id: submissionId },
       data: { status, successCount, failedCount },
     });
+
+    this.logger.debug(`[Status] submission ${submissionId} -> ${status} (success=${successCount}, failed=${failedCount}, allDone=${allDone})`);
   }
 }
