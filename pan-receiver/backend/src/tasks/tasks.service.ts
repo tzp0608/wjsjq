@@ -153,6 +153,7 @@ export class TasksService {
         size: typeof f.fileSize === 'bigint' ? Number(f.fileSize) : (f.fileSize || 0),
         status: f.transferStatus,
         path: f.ownerTargetPath || null,
+        shareUrl: f.shareUrl || null,
         errorMessage: f.errorMessage || null,
       })),
     }));

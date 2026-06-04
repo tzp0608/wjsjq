@@ -389,21 +389,26 @@ async function renderTask() {
             <div style="font-weight:600;font-size:15px;">${escapeHtml(s.submitterName || '匿名')}</div>
             <div style="font-size:12px;color:#999;">${new Date(s.createdAt).toLocaleString()}</div>
           </div>
-          <span class="status-badge status-${s.status === 'success' ? 'success' : s.status === 'failed' ? 'failed' : 'processing'}">
-            ${s.status === 'success' ? '成功' : s.status === 'partial_success' ? '部分成功' : s.status === 'failed' ? '失败' : '处理中'}
-          </span>
+          <div style="text-align:right;">
+            <span class="status-badge status-${s.status === 'success' ? 'success' : s.status === 'failed' ? 'failed' : 'processing'}">
+              ${s.status === 'success' ? '已分享' : s.status === 'partial_success' ? '部分成功' : s.status === 'failed' ? '失败' : '处理中'}
+            </span>
+            ${s.status === 'success' || s.status === 'partial_success' ? `<div style="margin-top:6px;"><button class="btn btn-primary btn-small" onclick="doTransfer('${s.id}', this)">转存到我的网盘</button></div>` : ''}
+          </div>
         </div>
         ${(s.files || []).map((f) => {
           const sizeNum = typeof f.size === 'number' && !isNaN(f.size) ? f.size : (parseInt(f.size, 10) || 0);
           const sizeText = sizeNum > 0 ? `${(sizeNum / 1024 / 1024).toFixed(2)} MB` : '';
+          const statusLabel = f.status === 'transferred' ? '已转存' : f.status === 'shared' ? '已分享' : f.status === 'failed' ? '失败' : '处理中';
           return `
           <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;padding-left:12px;font-size:14px;flex-wrap:wrap;">
             <span style="flex:1;word-break:break-all;min-width:0;">📄 ${escapeHtml(f.name)}</span>
             ${sizeText ? `<span style="font-size:12px;color:#999;white-space:nowrap;margin-left:8px;">${sizeText}</span>` : ''}
             ${f.status === 'transferred' && isImageFile(f.name) && f.path ? `<button class="btn btn-default btn-small" onclick="showImagePreview('${encodeURIComponent(f.path)}')" style="margin-left:8px;white-space:nowrap;">预览</button>` : ''}
-            <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;">
-              ${f.status === 'transferred' ? '已转存' : f.status === 'failed' ? '失败' : '处理中'}
+            <span class="status-badge status-${f.status === 'transferred' ? 'success' : f.status === 'shared' ? 'success' : f.status === 'failed' ? 'failed' : 'processing'}" style="margin-left:8px;font-size:11px;padding:2px 8px;">
+              ${statusLabel}
             </span>
+            ${f.status === 'shared' && f.shareUrl ? `<button class="btn btn-default btn-small" onclick="copyShareLink('${f.shareUrl}', this)" style="margin-left:4px;white-space:nowrap;">复制链接</button>` : ''}
             ${f.status === 'failed' && f.errorMessage ? `<div style="width:100%;font-size:12px;color:#ff4d4f;margin-top:4px;padding-left:24px;">错误：${escapeHtml(f.errorMessage)}</div>` : ''}
           </div>
         `;
@@ -1007,3 +1012,35 @@ window.addEventListener('DOMContentLoaded', () => {
   renderLogin();
   renderCreate();
 });
+
+// ========== Transfer & Share Link ==========
+async function doTransfer(submissionId, btn) {
+  btn.disabled = true;
+  btn.textContent = '转存中...';
+  try {
+    const res = await api(`/api/submissions/${submissionId}/transfer`, { method: 'POST' });
+    if (res.status === 'success' || res.status === 'partial_success') {
+      toast('转存成功');
+      renderTask();
+    } else {
+      toast('转存失败');
+      btn.disabled = false;
+      btn.textContent = '转存到我的网盘';
+    }
+  } catch (e) {
+    toast('转存失败：' + (e.message || '未知错误'));
+    btn.disabled = false;
+    btn.textContent = '转存到我的网盘';
+  }
+}
+
+function copyShareLink(shareUrl, btn) {
+  copyToClipboard(shareUrl).then(() => {
+    toast('链接已复制');
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    }
+  }).catch(() => toast('复制失败'));
+}

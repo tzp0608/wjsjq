@@ -71,4 +71,10 @@ export class SubmissionsController {
   retry(@Req() req: any, @Param('submissionId') submissionId: string) {
     return this.submissions.retrySubmission(submissionId, req.user.userId);
   }
+
+  @Post(':submissionId/transfer')
+  @UseGuards(AuthGuard('jwt'))
+  transferSubmission(@Req() req: any, @Param('submissionId') submissionId: string) {
+    return this.submissions.transferSubmission(submissionId, req.user.userId);
+  }
 }

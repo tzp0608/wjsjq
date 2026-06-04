@@ -219,4 +219,59 @@ export class SubmissionsService {
 
     return { submissionId, status: 'retrying' };
   }
+
+  async transferSubmission(submissionId: string, userId: string) {
+    const submission = await this.prisma.submission.findUnique({
+      where: { id: submissionId },
+      include: { task: true },
+    });
+    if (!submission) throw new NotFoundException('Submission not found');
+    if (submission.task.ownerUserId !== userId) throw new ForbiddenException('Not task owner');
+
+    const files = await this.prisma.submissionFile.findMany({
+      where: { submissionId, transferStatus: 'shared' },
+      include: { submission: { include: { submitter: true } } },
+    });
+
+    if (files.length === 0) throw new BadRequestException('No shared files to transfer');
+
+    const client = await this.baiduPan.getClient(userId);
+    const targetPath = submission.task.targetPath;
+
+    const results = [];
+    for (const f of files) {
+      try {
+        const folderName = `${f.submission.submitter.baiduNickname || '未知用户'}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+        const ownerPath = `${targetPath}/${folderName}`;
+        await client.ensureFolder(ownerPath);
+        const fromUk = f.submission.submitter.baiduUk || '';
+        await client.transferFromShare(f.shareUrl, ownerPath, fromUk);
+
+        await this.prisma.submissionFile.update({
+          where: { id: f.id },
+          data: { ownerTargetPath: `${ownerPath}/${f.fileName}`, transferStatus: 'transferred' },
+        });
+        results.push({ fileId: f.id, status: 'transferred' });
+      } catch (err: any) {
+        await this.prisma.submissionFile.update({
+          where: { id: f.id },
+          data: { transferStatus: 'failed', errorMessage: err.message },
+        });
+        results.push({ fileId: f.id, status: 'failed', error: err.message });
+      }
+    }
+
+    const successCount = results.filter((r) => r.status === 'transferred').length;
+    const failedCount = results.filter((r) => r.status === 'failed').length;
+    let status = 'success';
+    if (successCount > 0 && failedCount > 0) status = 'partial_success';
+    if (successCount === 0) status = 'failed';
+
+    await this.prisma.submission.update({
+      where: { id: submissionId },
+      data: { status, successCount, failedCount },
+    });
+
+    return { submissionId, status, results };
+  }
 }

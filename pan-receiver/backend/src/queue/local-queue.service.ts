@@ -95,16 +95,9 @@ export class LocalQueueService {
           where: { id: f.id },
           data: { shareId: String(shareRes.shareid || ''), shareUrl, transferStatus: 'shared' },
         });
-
-        const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
-        if (task) {
-          await this.addTransferJob({
-            fileId: f.id,
-            ownerUserId: task.ownerUserId,
-            targetPath: task.targetPath,
-          });
-        }
       }
+
+      await this.updateSubmissionStatus(submissionId);
     } catch (err: any) {
       for (const f of files) {
         await this.prisma.submissionFile.update({
@@ -169,18 +162,16 @@ export class LocalQueueService {
   private async updateSubmissionStatus(submissionId: string) {
     const files = await this.prisma.submissionFile.findMany({ where: { submissionId } });
     const allDone = files.every((f) =>
-      ['transferred', 'failed', 'waiting_owner_space'].includes(f.transferStatus),
+      ['shared', 'transferred', 'failed', 'waiting_owner_space'].includes(f.transferStatus),
     );
     if (!allDone) return;
 
-    const successCount = files.filter((f) => f.transferStatus === 'transferred').length;
+    const successCount = files.filter((f) => f.transferStatus === 'shared' || f.transferStatus === 'transferred').length;
     const failedCount = files.filter((f) => f.transferStatus === 'failed').length;
-    const waitingCount = files.filter((f) => f.transferStatus === 'waiting_owner_space').length;
 
     let status = 'success';
-    if (successCount > 0 && (failedCount > 0 || waitingCount > 0)) status = 'partial_success';
+    if (successCount > 0 && failedCount > 0) status = 'partial_success';
     if (successCount === 0 && failedCount > 0) status = 'failed';
-    if (successCount === 0 && waitingCount > 0) status = 'waiting_owner_space';
 
     await this.prisma.submission.update({
       where: { id: submissionId },

@@ -1,6 +1,8 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 export interface BaiduUserInfo {
   baidu_name: string;
@@ -94,27 +96,68 @@ export class BaiduPanClient {
   async uploadFile(localPath: string, remotePath: string) {
     const fileSize = fs.statSync(localPath).size;
     const fileData = fs.readFileSync(localPath);
-    const form = new FormData();
-    form.append('file', fileData, { filename: remotePath.split('/').pop() });
 
-    // 百度网盘 PCS 上传使用 pcs.baidu.com（d.pcs.baidu.com 是下载域名）
-    const uploadUrl = 'https://pcs.baidu.com/rest/2.0/pcs/file';
-    const { data: res } = await axios.post(uploadUrl, form, {
+    // 使用百度网盘 xpan 官方上传流程：precreate -> 分片上传 -> create
+    const fileName = remotePath.split('/').pop();
+    const dirPath = path.dirname(remotePath);
+
+    // Step 1: precreate - 创建文件记录
+    const precreateRes = await this.post('https://pan.baidu.com/rest/2.0/xpan/file?method=precreate', undefined, {
+      path: remotePath,
+      size: fileSize,
+      isdir: 0,
+      autoinit: 1,
+      block_list: JSON.stringify([this.md5(fileData)]),
+    });
+
+    if (precreateRes.errno !== 0) {
+      throw new Error(`Baidu precreate error: ${precreateRes.errno}`);
+    }
+
+    // 如果文件已存在且不需要上传
+    if (precreateRes.return_value?.exists === 1) {
+      return precreateRes.return_value;
+    }
+
+    const uploadId = precreateRes.return_value?.uploadid;
+    if (!uploadId) {
+      throw new Error('No uploadid from precreate');
+    }
+
+    // Step 2: superfile2 - 上传文件内容
+    const form = new FormData();
+    form.append('file', fileData, { filename: fileName });
+
+    await axios.post('https://pan.baidu.com/rest/2.0/xpan/file?method=superfile2', form, {
       params: {
-        method: 'upload',
+        method: 'superfile2',
         access_token: this.accessToken,
         path: remotePath,
-        ondup: 'newcopy',
+        uploadid: uploadId,
+        partseq: 0,
       },
       headers: form.getHeaders(),
       timeout: 120000,
     });
-    if (res.errno !== undefined && res.errno !== 0) {
-      const err = new Error(`Baidu upload error: ${res.errno}`);
-      (err as any).errno = res.errno;
-      throw err;
+
+    // Step 3: create - 创建文件记录
+    const createRes = await this.post('https://pan.baidu.com/rest/2.0/xpan/file?method=create', undefined, {
+      path: remotePath,
+      size: fileSize,
+      isdir: 0,
+      uploadid: uploadId,
+      block_list: JSON.stringify([this.md5(fileData)]),
+    });
+
+    if (createRes.errno !== 0) {
+      throw new Error(`Baidu create error: ${createRes.errno}`);
     }
-    return res;
+
+    return createRes;
+  }
+
+  private md5(data: Buffer): string {
+    return crypto.createHash('md5').update(data).digest('hex');
   }
 
   async getFileMeta(fsids: number[]) {
