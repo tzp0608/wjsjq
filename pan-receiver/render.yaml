@@ -45,6 +45,25 @@ services:
       - key: MAX_FILE_COUNT_PER_SUBMISSION
         value: 20
 
+  - type: web
+    name: pan-receiver-h5
+    runtime: static
+    plan: free
+    region: singapore
+    buildCommand: echo "No build needed for static site"
+    staticPublishPath: pan-receiver/h5
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+
 databases:
   - name: pan-receiver-db
     plan: free
