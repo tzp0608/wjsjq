@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BaiduPanService } from '../baidu-pan/baidu-pan.service';
 import { UploadJobData, ShareJobData, TransferJobData } from './queue.service';
+import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -20,215 +21,148 @@ export class LocalQueueService {
   }
 
   async addShareJob(data: ShareJobData) {
-    this.logger.log(`[LocalQueue] Share job for submission ${data.submissionId}`);
-    setImmediate(() => this.handleShare(data).catch((e) => this.logger.error(e)));
+    // 简化流程：不再单独做 share 步骤
+    // 对于 baidu_pan_existing 类型的文件，直接通过 handleUpload 处理
+    this.logger.log(`[LocalQueue] Share job for submission ${data.submissionId} (redirecting to upload flow)`);
+
+    const files = await this.prisma.submissionFile.findMany({
+      where: { submissionId: data.submissionId, sourceType: 'baidu_pan_existing', transferStatus: 'selected' },
+    });
+
+    for (const f of files) {
+      await this.addUploadJob({
+        fileId: f.id,
+        localPath: '',  // 网盘已有文件不需要本地上传
+        submitterUserId: data.submitterUserId,
+        taskId: data.taskId,
+        submissionId: data.submissionId,
+      });
+    }
   }
 
-  async addTransferJob(data: TransferJobData) {
-    this.logger.log(`[LocalQueue] Transfer job for file ${data.fileId}`);
-    setImmediate(() => this.handleTransfer(data).catch((e) => this.logger.error(e)));
+  async addTransferJob(_data: TransferJobData) {
+    // 简化流程：transfer 已在 upload 中完成
+    this.logger.log(`[LocalQueue] Transfer job skipped (handled in upload step)`);
   }
 
+  /**
+   * 核心处理逻辑 - 所有类型都简化为：下载到临时目录 → 上传到收集者的网盘目标目录
+   */
   private async handleUpload(data: UploadJobData) {
-    const { fileId, localPath, submitterUserId, taskId } = data;
+    const { fileId, localPath, submitterUserId, taskId, submissionId } = data;
     const fileRecord = await this.prisma.submissionFile.findUnique({ where: { id: fileId } });
     if (!fileRecord) {
       this.logger.warn(`[Upload] File record not found: ${fileId}`);
       return;
     }
 
-    // 查询提交者是否绑定了百度网盘
-    const submitter = await this.prisma.user.findUnique({
-      where: { id: submitterUserId },
-      select: { baiduUid: true, baiduNickname: true, nickname: true, username: true },
-    });
-    const submitterBaiduBound = !!submitter?.baiduUid;
-    this.logger.log(`[Upload] Starting for ${fileRecord.fileName} (${fileId}), submitterBound=${submitterBaiduBound}`);
-
     try {
-      // 标记为正在上传到百度网盘
+      // 更新状态为正在处理
       await this.prisma.submissionFile.update({
         where: { id: fileId },
         data: { transferStatus: 'uploading' },
       });
       await this.updateSubmissionStatus(fileRecord.submissionId);
 
-      let panPath: string;
-      let transferUserId: string;
-      if (submitterBaiduBound) {
-        // 提交者绑定了网盘：上传到提交者网盘，然后创建分享让收集者转存
-        transferUserId = submitterUserId;
-        panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
-      } else {
-        // 提交者未绑定网盘：服务器直接上传到收集者的网盘
-        const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
-        if (!task) throw new Error('Task not found');
-        const submitterName = submitter?.nickname || submitter?.username || submitter?.baiduNickname || '匿名用户';
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        // 路径：{owner targetPath}/direct_submissions/{submitterName}_{dateStr}/{fileName}
-        panPath = `${task.targetPath}/direct_submissions/${submitterName}_${dateStr}/${fileRecord.fileName}`;
-        transferUserId = task.ownerUserId;
+      // 查询任务信息获取 targetPath 和 ownerUserId
+      const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
+      if (!task) throw new Error('Task not found');
+
+      // 构建目标路径：{targetPath}/{submitterName}_{dateStr}/{fileName}
+      const submitter = await this.prisma.user.findUnique({
+        where: { id: submitterUserId },
+        select: { nickname: true, username: true, baiduNickname: true },
+      });
+      const submitterName = submitter?.nickname || submitter?.username || submitter?.baiduNickname || '匿名用户';
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const panDir = `${task.targetPath}/${submitterName}_${dateStr}`;
+      const panPath = `${panDir}/${fileRecord.fileName}`;
+
+      let tempFilePath = localPath;
+
+      // 如果是选择已有网盘文件的（sourceType=baidu_pan_existing），需要先用提交者token下载再上传
+      if (fileRecord.sourceType === 'baidu_pan_existing' && !localPath && fileRecord.submitterPanFsId) {
+        this.logger.log(`[Upload] Downloading existing Pan file ${fileRecord.fileName} (fsId=${fileRecord.submitterPanFsId})`);
+        
+        const submitterClient = await this.baiduPan.getClient(submitterUserId);
+        const dlinkRes = await submitterClient.getFileDlink([Number(fileRecord.submitterPanFsId)]);
+        const dlinks = dlinkRes.list || [];
+        if (dlinks.length === 0) throw new Error('无法获取文件下载链接');
+        
+        const dlink = dlinks[0].dlink;
+        const tmpDir = process.env.TEMP_FILE_DIR || '/tmp/pan-receiver';
+        fs.mkdirSync(tmpDir, { recursive: true });
+        tempFilePath = path.join(tmpDir, `${Date.now()}_${fileRecord.fileName}`);
+
+        this.logger.log(`[Upload] Downloading from dlink to ${tempFilePath}`);
+        
+        // 下载需要带 access_token 和 User-Agent
+        const submitterToken = await this.baiduPan.getValidToken(submitterUserId);
+        const response = await axios.get(`${dlink}&access_token=${submitterToken}`, {
+          responseType: 'stream',
+          timeout: 120000,
+          headers: { 'User-Agent': 'netdisk' },
+          maxRedirects: 5,
+        });
+        
+        const writer = fs.createWriteStream(tempFilePath);
+        await new Promise((resolve, reject) => {
+          response.data.pipe(writer);
+          writer.on('finish', resolve);
+          writer.on('error', reject);
+        });
+        this.logger.log(`[Upload] Download complete, size=${fs.statSync(tempFilePath).size}`);
       }
 
-      this.logger.log(`[Upload] Uploading ${localPath} -> ${panPath} (as user ${transferUserId})`);
+      if (!tempFilePath || !fs.existsSync(tempFilePath)) {
+        throw new Error('No file available for upload (missing local file or download failed)');
+      }
 
-      const client = await this.baiduPan.getClient(transferUserId);
-      this.logger.log(`[Upload] Ensuring folder: ${path.dirname(panPath)}`);
-      await client.ensureFolder(path.dirname(panPath));
-      this.logger.log(`[Upload] Uploading to Baidu...`);
-      await client.uploadFile(localPath, panPath);
-      this.logger.log(`[Upload] Upload complete for ${fileId}`);
+      // 用收集者的 Token 上传到其网盘的目标目录
+      this.logger.log(`[Upload] Uploading ${tempFilePath} -> ${panPath} (as owner ${task.ownerUserId})`);
 
-      // 标记为已上传
+      const ownerClient = await this.baiduPan.getClient(task.ownerUserId);
+      
+      // 先确保目录存在
+      this.logger.log(`[Upload] Ensuring folder exists: ${panDir}`);
+      await ownerClient.ensureFolder(panDir);
+
+      // 上传文件
+      this.logger.log(`[Upload] Starting PCS upload...`);
+      await ownerClient.uploadFile(tempFilePath, panPath);
+      this.logger.log(`[Upload] File uploaded successfully: ${panPath}`);
+
+      // 清理临时文件
+      try { 
+        if (tempFilePath !== localPath) fs.unlinkSync(tempFilePath); 
+      } catch (_) {}
+      try { 
+        if (localPath) fs.unlinkSync(localPath); 
+      } catch (_) {}
+
+      // 直接标记为已转存（因为已经到了最终位置）
       await this.prisma.submissionFile.update({
         where: { id: fileId },
-        data: { submitterPanPath: panPath, transferStatus: 'uploaded_to_pan' },
+        data: {
+          ownerTargetPath: panPath,
+          submitterPanPath: panPath,
+          transferStatus: 'transferred',
+        },
       });
       await this.updateSubmissionStatus(fileRecord.submissionId);
+      this.logger.log(`[Upload] Complete: ${panPath}`);
 
-      try { fs.unlinkSync(localPath); } catch (_) {}
-
-      // 根据绑定情况触发不同的后续步骤
-      if (submitterBaiduBound) {
-        // 走分享流程（创建分享让收集者转存）
-        await this.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
-      } else {
-        // 直接转存到收集者网盘 - 直接标记为已转存
-        await this.prisma.submissionFile.update({
-          where: { id: fileId },
-          data: {
-            ownerTargetPath: panPath,
-            transferStatus: 'transferred',
-          },
-        });
-        await this.updateSubmissionStatus(fileRecord.submissionId);
-        this.logger.log(`[Upload] Direct upload complete (no share needed): ${panPath}`);
-      }
     } catch (err: any) {
       const errMsg = err.errno ? `errno=${err.errno} ${err.message}` : err.message;
       this.logger.error(`[Upload] Failed for ${fileId}: ${errMsg}`, err.stack);
       await this.prisma.submissionFile.update({
         where: { id: fileId },
-        data: { transferStatus: 'failed', errorMessage: errMsg },
+        data: { transferStatus: 'failed', errorMessage: errMsg.slice(0, 500) },
       });
-      await this.updateSubmissionStatus(fileRecord.submissionId);
-    }
-  }
+      await this.updateSubmissionStatus(submissionId!);
 
-  private async handleShare(data: ShareJobData) {
-    const { submissionId, submitterUserId, taskId } = data;
-    const files = await this.prisma.submissionFile.findMany({
-      where: { submissionId, transferStatus: { in: ['uploaded_to_pan', 'selected'] } },
-    });
-    if (files.length === 0) {
-      this.logger.warn(`[Share] No files ready for submission ${submissionId}`);
-      return;
-    }
-
-    // 标记为正在创建分享
-    for (const f of files) {
-      await this.prisma.submissionFile.update({
-        where: { id: f.id },
-        data: { transferStatus: 'creating_share' },
-      });
-    }
-    await this.updateSubmissionStatus(submissionId);
-
-    try {
-      const client = await this.baiduPan.getClient(submitterUserId);
-      const fsids = files.map((f) => Number(f.submitterPanFsId || 0)).filter(Boolean);
-      if (fsids.length === 0) {
-        const metaList = await Promise.all(
-          files.map((f) =>
-            client.listFiles(path.dirname(f.submitterPanPath || '')).then((items: any[]) =>
-              items.find((i) => i.path === f.submitterPanPath),
-            ),
-          ),
-        );
-        for (let i = 0; i < files.length; i++) {
-          if (metaList[i]) {
-            fsids.push(metaList[i].fs_id);
-            await this.prisma.submissionFile.update({
-              where: { id: files[i].id },
-              data: { submitterPanFsId: String(metaList[i].fs_id) },
-            });
-          }
-        }
-      }
-
-      if (fsids.length === 0) throw new Error('No valid fsids found');
-
-      const shareRes = await client.createShare(fsids);
-      const shareUrl = shareRes.shortlink || shareRes.link || '';
-
-      for (const f of files) {
-        await this.prisma.submissionFile.update({
-          where: { id: f.id },
-          data: { shareId: String(shareRes.shareid || ''), shareUrl, transferStatus: 'shared' },
-        });
-      }
-
-      await this.updateSubmissionStatus(submissionId);
-    } catch (err: any) {
-      this.logger.error(`[Share] Failed for submission ${submissionId}: ${err.message}`, err.stack);
-      for (const f of files) {
-        await this.prisma.submissionFile.update({
-          where: { id: f.id },
-          data: { transferStatus: 'failed', errorMessage: err.message },
-        });
-      }
-      await this.updateSubmissionStatus(submissionId);
-    }
-  }
-
-  private async handleTransfer(data: TransferJobData) {
-    const { fileId, ownerUserId, targetPath } = data;
-    const fileRecord = await this.prisma.submissionFile.findUnique({
-      where: { id: fileId },
-      include: { submission: { include: { submitter: true } } },
-    });
-    if (!fileRecord || !fileRecord.shareUrl) return;
-
-    try {
-      const client = await this.baiduPan.getClient(ownerUserId);
-      const quota = await client.getQuota();
-      const freeSpace = (quota.total || 0) - (quota.used || 0);
-      if (freeSpace < fileRecord.fileSize) {
-        await this.prisma.submissionFile.update({
-          where: { id: fileId },
-          data: { transferStatus: 'waiting_owner_space', errorMessage: 'Owner space insufficient' },
-        });
-        return;
-      }
-
-      const submitter = await this.prisma.user.findUnique({ where: { id: fileRecord.submitterUserId } });
-      const fromUk = submitter?.baiduUk || '';
-
-      const folderName = `${fileRecord.submission.submitter.baiduNickname || '未知用户'}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
-      const ownerPath = `${targetPath}/${folderName}`;
-      await client.createFolder(ownerPath);
-      await client.transferFromShare(fileRecord.shareUrl, ownerPath, fromUk);
-
-      await this.prisma.submissionFile.update({
-        where: { id: fileId },
-        data: { ownerTargetPath: `${ownerPath}/${fileRecord.fileName}`, transferStatus: 'transferred' },
-      });
-
-      await this.prisma.submission.update({
-        where: { id: fileRecord.submissionId },
-        data: {
-          successCount: { increment: 1 },
-          status: 'processing',
-        },
-      });
-
-      await this.updateSubmissionStatus(fileRecord.submissionId);
-    } catch (err: any) {
-      await this.prisma.submissionFile.update({
-        where: { id: fileId },
-        data: { transferStatus: 'failed', errorMessage: err.message },
-      });
-      await this.updateSubmissionStatus(fileRecord.submissionId);
+      // 清理可能的临时文件
+      try { if (localPath) fs.unlinkSync(localPath); } catch (_) {}
     }
   }
 
@@ -236,10 +170,10 @@ export class LocalQueueService {
     const files = await this.prisma.submissionFile.findMany({ where: { submissionId } });
     if (files.length === 0) return;
 
-    const doneStatuses = ['shared', 'transferred', 'failed', 'waiting_owner_space'];
+    const doneStatuses = ['transferred', 'failed'];
     const allDone = files.every((f) => doneStatuses.includes(f.transferStatus));
 
-    const successCount = files.filter((f) => f.transferStatus === 'shared' || f.transferStatus === 'transferred').length;
+    const successCount = files.filter((f) => f.transferStatus === 'transferred').length;
     const failedCount = files.filter((f) => f.transferStatus === 'failed').length;
 
     let status = 'processing';
@@ -252,6 +186,6 @@ export class LocalQueueService {
       data: { status, successCount, failedCount },
     });
 
-    this.logger.debug(`[Status] submission ${submissionId} -> ${status} (success=${successCount}, failed=${failedCount}, allDone=${allDone})`);
+    this.logger.debug(`[Status] submission ${submissionId} -> ${status} (${successCount} ok, ${failedCount} fail)`);
   }
 }

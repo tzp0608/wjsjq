@@ -182,13 +182,23 @@ export class SubmissionsService {
       }
     }
 
-    await this.queue.addShareJob({
-      submissionId,
-      submitterUserId: userId,
-      taskId: submission.taskId,
+    // 为每个文件触发上传任务（统一流程：下载→上传到收集者网盘）
+    const allFiles = await this.prisma.submissionFile.findMany({
+      where: { submissionId },
     });
+    for (const f of allFiles) {
+      if (f.transferStatus === 'selected') {
+        await this.queue.addUploadJob({
+          submissionId,
+          fileId: f.id,
+          localPath: '',  // 网盘已有文件不需要本地上传
+          submitterUserId: userId,
+          taskId: submission.taskId,
+        });
+      }
+    }
 
-    return { submissionId, status: 'creating_share' };
+    return { submissionId, status: 'processing' };
   }
 
   async getStatus(submissionId: string, userId?: string) {
