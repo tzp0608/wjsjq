@@ -831,7 +831,12 @@ async function loadPanFileBrowser(path, container, infoEl) {
       };
     });
   } catch (e) {
-    container.innerHTML = `<div class="empty-state"><p>加载失败：${escapeHtml(e.message)}</p></div>`;
+    const errMsg = e.message || '未知错误';
+    let actionHtml = '';
+    if (errMsg.includes('授权') || errMsg.includes('绑定') || errMsg.includes('过期')) {
+      actionHtml = `<button class="btn btn-primary btn-small" onclick="bindBaiduForSubmit()" style="margin-top:12px;">重新绑定百度网盘</button>`;
+    }
+    container.innerHTML = `<div class="empty-state"><p>加载失败：${escapeHtml(errMsg)}</p>${actionHtml}</div>`;
   }
 }
 
