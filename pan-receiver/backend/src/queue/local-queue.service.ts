@@ -48,7 +48,8 @@ export class LocalQueueService {
       await this.updateSubmissionStatus(fileRecord.submissionId);
 
       const client = await this.baiduPan.getClient(submitterUserId);
-      const panPath = `/apps/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      // 使用用户根目录下的文件夹，避免 /apps/ 需要特殊权限的问题
+      const panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
       this.logger.log(`[Upload] Ensuring folder: ${path.dirname(panPath)}`);
       await client.ensureFolder(path.dirname(panPath));
       this.logger.log(`[Upload] Uploading ${localPath} -> ${panPath}`);
@@ -130,6 +131,7 @@ export class LocalQueueService {
 
       await this.updateSubmissionStatus(submissionId);
     } catch (err: any) {
+      this.logger.error(`[Share] Failed for submission ${submissionId}: ${err.message}`, err.stack);
       for (const f of files) {
         await this.prisma.submissionFile.update({
           where: { id: f.id },

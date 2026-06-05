@@ -23,7 +23,7 @@ export class UploadProcessor extends WorkerHost {
 
     try {
       const client = await this.baiduPan.getClient(submitterUserId);
-      const panPath = `/apps/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      const panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
       await client.ensureFolder(path.dirname(panPath));
       await client.uploadFile(localPath, panPath);
 
