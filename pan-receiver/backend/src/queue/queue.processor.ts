@@ -23,7 +23,7 @@ export class UploadProcessor extends WorkerHost {
 
     const submitter = await this.prisma.user.findUnique({
       where: { id: submitterUserId },
-      select: { baiduUid: true, baiduNickname: true },
+      select: { baiduUid: true, baiduNickname: true, nickname: true, username: true },
     });
     const submitterBaiduBound = !!submitter?.baiduUid;
 
@@ -36,7 +36,7 @@ export class UploadProcessor extends WorkerHost {
       } else {
         const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
         if (!task) throw new Error('Task not found');
-        const submitterName = submitter?.baiduNickname || '匿名';
+        const submitterName = submitter?.nickname || submitter?.username || submitter?.baiduNickname || '匿名用户';
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         panPath = `${task.targetPath}/direct_submissions/${submitterName}_${dateStr}/${fileRecord.fileName}`;
         transferUserId = task.ownerUserId;

@@ -562,7 +562,7 @@ async function renderSubmit() {
   // 本地上传提交按钮
   const btnLocal = document.getElementById('btn-submit-files');
 
-  // 检查网盘绑定状态（本地上传也需要提交者的网盘来中转）
+  // 检查网盘绑定状态（影响上传流程提示）
   let submitterBaiduBound = false;
   try {
     const me = await api('/api/auth/me');
@@ -571,28 +571,24 @@ async function renderSubmit() {
     // ignore
   }
 
-  // 如果未绑定网盘，显示提示并禁用提交按钮
+  // 未绑定网盘也可以提交，服务器会直接上传到收集者网盘
   const localBindHint = document.getElementById('local-bind-hint');
   if (!submitterBaiduBound) {
     if (localBindHint) {
       localBindHint.innerHTML = `
-        <div style="text-align:center;padding:16px;background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;margin-bottom:12px;">
-          <p style="color:#d48806;margin-bottom:8px;font-size:14px;">未绑定百度网盘，文件无法自动转存到收集人网盘</p>
-          <button class="btn btn-primary btn-small" onclick="bindBaiduForSubmit()">绑定百度网盘</button>
+        <div style="text-align:center;padding:12px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:8px;margin-bottom:12px;">
+          <p style="color:#1890ff;margin-bottom:0;font-size:13px;">您未绑定百度网盘，文件将直接存储到收集者网盘</p>
         </div>
       `;
     }
-    btnLocal.disabled = true;
-    btnLocal.textContent = '请先绑定百度网盘';
   } else {
     if (localBindHint) localBindHint.innerHTML = '';
-    btnLocal.disabled = false;
-    btnLocal.textContent = '确认提交';
   }
+  btnLocal.disabled = false;
+  btnLocal.textContent = '确认提交';
 
   // 本地上传提交
   btnLocal.onclick = async () => {
-    if (!submitterBaiduBound) { toast('请先绑定百度网盘'); return; }
     if (selectedFiles.length === 0) { toast('请先选择文件'); return; }
     btnLocal.disabled = true;
     btnLocal.textContent = '创建提交单...';

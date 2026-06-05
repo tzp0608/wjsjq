@@ -40,7 +40,7 @@ export class LocalQueueService {
     // 查询提交者是否绑定了百度网盘
     const submitter = await this.prisma.user.findUnique({
       where: { id: submitterUserId },
-      select: { baiduUid: true, baiduNickname: true },
+      select: { baiduUid: true, baiduNickname: true, nickname: true, username: true },
     });
     const submitterBaiduBound = !!submitter?.baiduUid;
     this.logger.log(`[Upload] Starting for ${fileRecord.fileName} (${fileId}), submitterBound=${submitterBaiduBound}`);
@@ -63,7 +63,7 @@ export class LocalQueueService {
         // 提交者未绑定网盘：服务器直接上传到收集者的网盘
         const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
         if (!task) throw new Error('Task not found');
-        const submitterName = submitter?.baiduNickname || submitter?.baiduNickname || '匿名';
+        const submitterName = submitter?.nickname || submitter?.username || submitter?.baiduNickname || '匿名用户';
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         // 路径：{owner targetPath}/direct_submissions/{submitterName}_{dateStr}/{fileName}
         panPath = `${task.targetPath}/direct_submissions/${submitterName}_${dateStr}/${fileRecord.fileName}`;
