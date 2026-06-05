@@ -2,7 +2,6 @@ import axios from 'axios';
 import FormData from 'form-data';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
 
 export interface BaiduUserInfo {
   baidu_name: string;
@@ -43,7 +42,7 @@ export class BaiduPanClient {
     const { data: res } = await axios.post(url, body, {
       params: { ...params, access_token: this.accessToken },
       headers: body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : undefined,
-      timeout: 30000,
+      timeout: 60000,
     });
     if (res.errno !== undefined && res.errno !== 0) {
       const err = new Error(`Baidu API error: ${res.errno}`);
@@ -69,254 +68,139 @@ export class BaiduPanClient {
     return (res.list || []) as BaiduFileItem[];
   }
 
+  /** 创建文件夹 */
   async createFolder(targetPath: string) {
-    return this.post('https://pan.baidu.com/rest/2.0/xpan/file?method=create', undefined, {
-      path: targetPath,
-      size: 0,
-      isdir: 1,
-      rtype: 1,
-    });
+    try {
+      return await this.post('https://pan.baidu.com/rest/2.0/xpan/file?method=create', undefined, {
+        path: targetPath,
+        size: 0,
+        isdir: 1,
+        rtype: 1,
+      });
+    } catch (e: any) {
+      // -8 表示已存在
+      if (e.errno === -8 || e.message?.includes('file exist')) return {};
+      throw e;
+    }
   }
 
-  /** 移动文件到新位置 */
-  async moveFile(sourcePath: string, destPath: string) {
-    return this.post('https://pan.baidu.com/rest/2.0/xpan/file?method=filemanager', undefined, {
-      opera: 'move',
-      async: 0,
-      filelist: JSON.stringify([{ src: sourcePath, dest: destPath }]),
-    });
-  }
+  /** 确保目录路径存在 */
+  async ensureFolder(dirPath: string) {
+    if (!dirPath || dirPath === '/') return;
+    // 尝试一次性创建整个路径；如果中间目录不存在会失败，则逐级创建
+    try {
+      await this.createFolder(dirPath);
+      return;
+    } catch (_) {}
 
-  async ensureFolder(targetPath: string) {
-    const parts = targetPath.split('/').filter(Boolean);
+    const parts = dirPath.split('/').filter(Boolean);
     let current = '';
     for (const part of parts) {
       current += '/' + part;
       try {
         await this.createFolder(current);
       } catch (e: any) {
-        if (
-          e.errno === -8 ||
-          e.errno === 2 ||
-          e.message?.includes('file exist') ||
-          e.message?.includes('errno=2')
-        ) continue; // already exists
-        // Token expired — must stop
-        if (e.errno === -6 || e.errno === -7) throw e;
-        // Other errors might be permission issues on /apps/ etc; log and try to continue
+        if (e.errno === -6 || e.errno === -7) throw e; // token 过期必须停止
+        // 其他错误（如已存在）忽略继续
       }
     }
   }
 
   /**
-   * 获取上传域名
-   */
-  async getUploadHost(): Promise<string> {
-    try {
-      const res = await axios.get(
-        'https://pan.baidu.com/rest/2.0/pcs/upload',
-        { params: { method: 'uploadhost', access_token: this.accessToken }, timeout: 15000 },
-      );
-      if (res.data?.host) return res.data.host;
-    } catch (_) {}
-    // fallback: 尝试 d.pcs.baidu.com 或 c.pcs.baidu.com
-    return 'd.pcs.baidu.com';
-  }
-
-  /**
-   * 统一的上传入口：
-   * 先用 precreate + superfile2 + create 流程，
-   * 如果失败则降级为单步上传。
+   * 上传文件到百度网盘的统一入口。
    *
-   * 第三方应用的文件需要上传到 /apps/{appName} 路径下,
-   * 然后再通过 filemanager 的 move 操作移到最终位置.
+   * 百度开放平台限制：第三方应用只能上传文件到 /apps/{appName}/ 目录下，
+   * 所以策略是：
+   *   1. 先上传到 /apps/_tmp_upload/ 临时目录（保证一定可以写入）
+   *   2. 确保目标父目录存在
+   *   3. 用 filemanager move 将文件移到最终位置
    */
-  async uploadFile(localPath: string, remotePath: string) {
-    // 确保 localPath 存在
-    if (!fs.existsSync(localPath)) {
-      throw new Error(`Local file not found: ${localPath}`);
+  async uploadFile(localFilePath: string, remotePath: string) {
+    if (!fs.existsSync(localFilePath)) {
+      throw new Error(`Local file not found: ${localFilePath}`);
     }
 
-    const fileSize = fs.statSync(localPath).size;
+    const fileSize = fs.statSync(localFilePath).size;
 
-    // Step 1: 确保远程文件夹存在
-    await this.ensureFolder(path.dirname(remotePath));
-
-    // Step 2: 对于小文件(≤4MB)，优先尝试直接单步上传
-    if (fileSize <= 4 * 1024 * 1024) {
-      try {
-        return await this._singleStepUpload(localPath, remotePath);
-      } catch (e: any) {
-        // 如果是因为路径不在 /apps/ 下导致失败，走"上传+移动"流程
-        if (this._isPathError(e)) {
-          return await this._uploadViaAppsDir(localPath, remotePath);
-        }
-        throw e;
-      }
-    }
-
-    // 大文件：precreate -> superfile2 -> create 流程
-    try {
-      return await this._chunkedUpload(localPath, remotePath, fileSize);
-    } catch (e: any) {
-      if (this._isPathError(e)) {
-        return await this._uploadViaAppsDir(localPath, remotePath);
-      }
-      throw e;
-    }
-  }
-
-  /** 判断是否为路径相关错误(errno=-9 等) */
-  private _isPathError(e: any): boolean {
-    return e.errno === -9 || e.message?.includes('路径不存在') || e.message?.includes('permission');
-  }
-
-  /** 通过 /apps/ 中转目录上传再移动 */
-  private async _uploadViaAppsDir(localPath: string, finalRemotePath: string) {
-    const fileName = finalRemotePath.split('/').pop();
-    const tmpName = `${Date.now()}_${Math.random().toString(36).slice(2)}_${fileName}`;
-    const tmpPath = `/apps/_tmp_upload/${tmpName}`;
-
-    // 在临时目录上传
-    await this.ensureFolder('/apps/_tmp_upload');
-
-    const stat = fs.statSync(localPath);
-    if (stat.size <= 4 * 1024 * 1024) {
-      await this._singleStepUpload(localPath, tmpPath);
-    } else {
-      await this._chunkedUpload(localPath, tmpPath, stat.size);
-    }
-
-    // 确保最终目标的父目录存在
-    await this.ensureFolder(path.dirname(finalRemotePath));
+    // Step 1: 上传到 /apps/_tmp_upload/
+    const fileName = path.basename(remotePath);
+    const tmpUploadDir = '/apps/_tmp_upload';
     
-    // 移动到最终位置
-    await this.moveFile(tmpPath, finalRemotePath);
+    // 确保临时上传目录存在
+    await this.ensureFolder(tmpUploadDir);
 
-    return { path: finalRemotePath };
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).slice(2, 8);
+    const safeName = `${timestamp}_${randomSuffix}_${fileName}`;
+    const appsTmpPath = `${tmpUploadDir}/${safeName}`;
+
+    console.log(`[BaiduClient] Uploading to temp: ${appsTmpPath} (${(fileSize / 1024).toFixed(1)} KB)`);
+
+    // 执行 PCS 单步上传
+    await this._pcsSingleUpload(localFilePath, appsTmpPath);
+
+    // 如果目标路径就在 /apps/ 下且不需要移动，直接返回
+    if (remotePath.startsWith('/apps/')) {
+      // 目标也在 /apps/ 内：先确保目标目录存在再 rename/move
+      if (appsTmpPath !== remotePath) {
+        await this.ensureFolder(path.dirname(remotePath));
+        await this._moveFile(appsTmpPath, remotePath);
+      }
+      return { path: remotePath };
+    }
+
+    // Step 2: 目标不在 /apps/ 下 → 创建目标目录 + move 文件过去
+    console.log(`[BaiduClient] Moving from ${appsTmpPath} -> ${remotePath}`);
+
+    await this.ensureFolder(path.dirname(remotePath));
+    await this._moveFile(appsTmpPath, remotePath);
+
+    return { path: remotePath };
   }
 
-  /** 单步上传(≤4MB) */
-  private async _singleStepUpload(localPath: string, remotePath: string) {
-    const fileBuffer = fs.readFileSync(localPath);
+  /** PCS 单步上传（小文件 ≤4MB 直接传；大文件也走这个接口，百度有自动处理）*/
+  private async _pcsSingleUpload(localFilePath: string, pcsRemotePath: string) {
+    const fileBuffer = fs.readFileSync(localFilePath);
     const form = new FormData();
-    form.append('file', fileBuffer, { filename: remotePath.split('/').pop() });
+    form.append('file', fileBuffer, { filename: path.basename(pcsRemotePath) });
 
-    const uploadHost = await this.getUploadHost();
-    const url = `https://${uploadHost}/rest/2.0/pcs/file?method=upload&access_token=${this.accessToken}&path=${encodeURIComponent(remotePath)}&ondup=newcopy`;
+    // 使用 c.pcs.baidu.com 作为上传域名（稳定可用）
+    const url = `https://c.pcs.baidu.com/rest/2.0/pcs/file?method=upload&access_token=${this.accessToken}&path=${encodeURIComponent(pcsRemotePath)}&ondup=newcopy`;
 
-    let res;
+    let res: any;
     try {
       const resp = await axios.post(url, form, {
         headers: form.getHeaders(),
-        timeout: 120000,
+        timeout: 180000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
       res = resp.data;
     } catch (e: any) {
       if (e.response?.data) res = e.response.data;
-      else throw new Error(`Baidu upload network error: ${e.message}`);
+      else throw new Error(`PCS upload network error: ${e.message}`);
     }
 
-    if (res?.errno !== undefined && res.errno !== 0) {
-      const meaning = this.getErrorMeaning(res.errno);
-      throw new Error(`百度网盘上传失败: errno=${res.errno}${meaning ? ' (' + meaning + ')' : ''} | path=${remotePath}`);
+    if (!res) throw new Error('PCS upload returned empty response');
+
+    if (res.errno !== undefined && res.errno !== 0) {
+      const meaning = this._errorMeaning(res.errno);
+      throw new Error(`百度网盘上传失败 errno=${res.errno}${meaning ? '('+meaning+')' : ''}, path=${pcsRemotePath}`);
     }
+
     return res;
   }
 
-  /** 分片上传(precreate→superfile2→create) */
-  private async _chunkedUpload(localPath: string, remotePath: string, fileSize: number) {
-    const blockSize = 4 * 1024 * 1024;
-    const totalBlocks = Math.min(Math.ceil(fileSize / blockSize), 1024);
-
-    // Precreate
-    const preRes = await this.post(
-      'https://pan.baidu.com/rest/2.0/xpan/file?method=precreate',
-      undefined,
-      {
-        path: remotePath,
-        size: String(fileSize),
-        isdir: '0',
-        autoinit: '1',
-        block_list: JSON.stringify(Array.from({ length: totalBlocks }, (_, i) => i)),
-      },
-    );
-
-    const uploadId = String(preRes.uploadid || '');
-    if (!uploadId) throw new Error('precreate failed: no uploadid returned');
-
-    const needBlockList: number[] = preRes.block_list && preRes.block_list.length > 0
-      ? preRes.block_list
-      : Array.from({ length: totalBlocks }, (_, i) => i);
-
-    // Upload chunks
-    const uploadHost = await this.getUploadHost();
-    const actualMd5s: string[] = [];
-
-    for (const blockIdx of needBlockList) {
-      if (blockIdx >= totalBlocks) continue;
-
-      const start = blockIdx * blockSize;
-      const end = Math.min(start + blockSize, fileSize);
-      const bufLen = end - start;
-
-      const fd = fs.openSync(localPath, 'r');
-      const buf = Buffer.alloc(bufLen);
-      fs.readSync(fd, buf, 0, bufLen, start);
-      fs.closeSync(fd);
-
-      const chunkForm = new FormData();
-      chunkForm.append('file', buf, { filename: String(blockIdx) });
-
-      const chunkUrl = `https://${uploadHost}/rest/2.0/pcs/superfile2?method=upload&access_token=${this.accessToken}&type=tmpfile&path=${encodeURIComponent(remotePath)}&uploadid=${encodeURIComponent(uploadId)}&partseq=${blockIdx}`;
-
-      let chunkRes;
-      try {
-        const cResp = await axios.post(chunkUrl, chunkForm, {
-          headers: chunkForm.getHeaders(),
-          timeout: 120000,
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-        });
-        chunkRes = cResp.data;
-      } catch (e: any) {
-        if (e.response?.data) chunkRes = e.response.data;
-        else throw new Error(`Chunk upload failed at block ${blockIdx}: ${e.message}`);
-      }
-
-      if (chunkRes?.md5) {
-        actualMd5s[blockIdx] = chunkRes.md5;
-      } else {
-        actualMd5s[blockIdx] = crypto.createHash('md5').update(buf).digest('hex');
-      }
-    }
-
-    // Fill in missing blocks' MD5
-    for (let i = 0; i < totalBlocks; i++) {
-      if (!actualMd5s[i]) {
-        const start = i * blockSize;
-        const end = Math.min(start + blockSize, fileSize);
-        const fd = fs.openSync(localPath, 'r');
-        const buf = Buffer.alloc(end - start);
-        fs.readSync(fd, buf, 0, end - start, start);
-        fs.closeSync(fd);
-        actualMd5s[i] = crypto.createHash('md5').update(buf).digest('hex');
-      }
-    }
-
-    // Create (merge)
-    const validMd5s = actualMd5s.slice(0, totalBlocks);
+  /** 通过 xpan/filemanager 接口重命名(可跨目录=移动) */
+  private async _moveFile(srcPath: string, destPath: string) {
     return this.post(
-      'https://pan.baidu.com/rest/2.0/xpan/file?method=create',
+      'https://pan.baidu.com/rest/2.0/xpan/file?method=filemanager',
       undefined,
       {
-        path: remotePath,
-        size: String(fileSize),
-        isdir: '0',
-        block_list: JSON.stringify(validMd5s),
-        uploadid,
+        opera: 'rename',
+        async: '1',
+        filelist: JSON.stringify([{ path: srcPath, newname: destPath }]),
+        ondup: 'newcopy',
       },
     );
   }
@@ -330,15 +214,6 @@ export class BaiduPanClient {
     });
   }
 
-  async getFileMetaWithThumb(fsids: number[]) {
-    return this.get('https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas', {
-      fsids: `[${fsids.join(',')}]`,
-      thumb: 1,
-      dlink: 0,
-      extra: 1,
-    });
-  }
-
   async getFileDlink(fsids: number[]) {
     return this.get('https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas', {
       fsids: `[${fsids.join(',')}]`,
@@ -348,18 +223,25 @@ export class BaiduPanClient {
     });
   }
 
-  getErrorMeaning(errno: number): string {
+  async getFileMetaWithThumb(fsids: number[]) {
+    return this.get('https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas', {
+      fsids: `[${fsids.join(',')}]`,
+      thumb: 1,
+      dlink: 0,
+      extra: 1,
+    });
+  }
+
+  private _errorMeaning(errno: number): string {
     const map: Record<number, string> = {
-      [-6]: 'access_token 无效或过期',
+      [-6]: 'token无效或过期',
       [-7]: '需重新授权',
       [-8]: '文件已存在',
       [-9]: '路径不存在或权限不足',
       [-10]: '容量不足',
-      [-11]: '权限被拒绝',
-      [2]: '路径不存在',
-      [31079]: '文件大小超过限制',
-      [31120]: '用户未授权该应用',
-      [31401]: 'access_token 过期',
+      [2]: '参数错误',
+      [31079]: '文件超限',
+      [31120]: '未授权该应用',
     };
     return map[errno] || '';
   }
