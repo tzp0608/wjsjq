@@ -267,6 +267,9 @@ export class SubmissionsService {
         const ownerPath = `${targetPath}/${folderName}`;
         await client.ensureFolder(ownerPath);
         const fromUk = f.submission.submitter.baiduUk || '';
+        if (!f.shareUrl) {
+          throw new Error('File has no shareUrl');
+        }
         await client.transferFromShare(f.shareUrl, ownerPath, fromUk);
 
         await this.prisma.submissionFile.update({

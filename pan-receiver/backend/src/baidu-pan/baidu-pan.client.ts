@@ -19,6 +19,7 @@ export interface BaiduFileItem {
   isdir: number;
   fs_id: number;
   md5?: string;
+  category?: number;
 }
 
 export class BaiduPanClient {

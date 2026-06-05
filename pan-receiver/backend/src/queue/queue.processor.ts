@@ -102,8 +102,26 @@ export class ShareProcessor extends WorkerHost {
           data: { transferStatus: 'failed', errorMessage: err.message },
         });
       }
+      await this.updateSubmissionStatus(submissionId);
       throw err;
     }
+  }
+
+  private async updateSubmissionStatus(submissionId: string) {
+    const files = await this.prisma.submissionFile.findMany({ where: { submissionId } });
+    if (files.length === 0) return;
+    const doneStatuses = ['shared', 'transferred', 'failed', 'waiting_owner_space'];
+    const allDone = files.every((f) => doneStatuses.includes(f.transferStatus));
+    const successCount = files.filter((f) => f.transferStatus === 'shared' || f.transferStatus === 'transferred').length;
+    const failedCount = files.filter((f) => f.transferStatus === 'failed').length;
+    let status = 'processing';
+    if (allDone && successCount > 0 && failedCount === 0) status = 'success';
+    if (allDone && successCount > 0 && failedCount > 0) status = 'partial_success';
+    if (allDone && successCount === 0 && failedCount > 0) status = 'failed';
+    await this.prisma.submission.update({
+      where: { id: submissionId },
+      data: { status, successCount, failedCount },
+    });
   }
 }
 
