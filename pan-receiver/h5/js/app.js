@@ -474,16 +474,40 @@ async function renderSubmit() {
   document.getElementById('submit-status').classList.add('hidden');
 
   // 加载任务信息
+  let publicTask = null;
   try {
-    const task = await api(`/api/public/tasks/${taskId}?code=${code}`);
+    publicTask = await api(`/api/public/tasks/${taskId}?code=${code}`);
     document.getElementById('submit-task-info').innerHTML = `
-      <div class="card-title">${escapeHtml(task.title)}</div>
-      <p style="color:#666;margin-bottom:12px;">${escapeHtml(task.description || '')}</p>
-      <div style="font-size:13px;color:#999;">发起人：${escapeHtml(task.ownerName)}</div>
-      ${task.deadline ? `<div style="font-size:13px;color:#999;">截止：${task.deadline}</div>` : ''}
+      <div class="card-title">${escapeHtml(publicTask.title)}</div>
+      <p style="color:#666;margin-bottom:12px;">${escapeHtml(publicTask.description || '')}</p>
+      <div style="font-size:13px;color:#999;">发起人：${escapeHtml(publicTask.ownerName)}</div>
+      ${publicTask.deadline ? `<div style="font-size:13px;color:#999;">截止：${publicTask.deadline}</div>` : ''}
     `;
   } catch (e) {
     document.getElementById('submit-content').innerHTML = '<div class="empty-state"><p>任务加载失败或已过期</p></div>';
+    return;
+  }
+
+  // 检查是否与发起人是同一个百度账号
+  let me = null;
+  try {
+    me = await api('/api/auth/me');
+  } catch (e) {}
+
+  let sameBaiduAccount = false;
+  if (me?.baiduBound && publicTask?.ownerBaiduUid && me.baiduUid === publicTask.ownerBaiduUid) {
+    sameBaiduAccount = true;
+  }
+
+  if (sameBaiduAccount) {
+    // 显示禁止同账号提示，并禁用整个提交区域
+    document.getElementById('submit-content').innerHTML = `
+      <div class="card-title" style="color:#ff4d4f;">⚠️ 无法提交</div>
+      <div style="background:#fff2f0;border:1px solid #ffccc7;border-radius:8px;padding:16px;color:#a8071a;">
+        <p style="margin-bottom:8px;"><strong>检测到您与发起人使用的是同一个百度网盘账号（${escapeHtml(me.baiduNickname || me.baiduUid)}）</strong></p>
+        <p style="font-size:13px;line-height:1.6;">不允许使用同一个网盘账号向自己提交文件。请使用其他百度账号登录后再访问本链接，或用其他方式（如直接添加到百度网盘）向发起人提交文件。</p>
+      </div>
+    `;
     return;
   }
 
@@ -720,17 +744,45 @@ async function bindBaiduForSubmit() {
 
 async function loadPanFileBrowser(path, container, infoEl) {
   container.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  // 记录浏览历史
+  if (!container._history) container._history = [];
+  if (container._currentPath && container._currentPath !== path) {
+    container._history.push(container._currentPath);
+  }
+  container._currentPath = path;
+  // 历史超过 50 条时清空
+  if (container._history.length > 50) container._history = container._history.slice(-50);
+
   try {
     const data = await api(`/api/baidu/files?path=${encodeURIComponent(path)}`);
     const items = data.items || [];
     const folders = items.filter((i) => i.isDir);
     const files = items.filter((i) => !i.isDir);
 
-    let html = '';
-    if (path !== '/' && path !== '') {
-      const parentPath = path.split('/').slice(0, -1).join('/') || '/';
-      html += `<div class="folder-item" onclick="loadPanFileBrowser('${escapeHtml(parentPath)}', document.getElementById('pan-file-browser'), document.getElementById('pan-selected-info'))"><span style="font-size:18px;margin-right:8px;">⬅️</span><span>返回上一级</span></div>`;
+    // 面包屑：显示当前路径
+    const pathSegments = path.split('/').filter(Boolean);
+    let breadcrumb = '<div style="font-size:12px;color:#666;padding:6px 0;word-break:break-all;background:#f9f9f9;border-radius:4px;margin-bottom:8px;padding-left:8px;">';
+    breadcrumb += `<a href="javascript:void(0)" onclick="loadPanFileBrowser('/', document.getElementById('pan-file-browser'), document.getElementById('pan-selected-info'))" style="color:#1890ff;">根目录</a>`;
+    let currentPath = '';
+    for (const seg of pathSegments) {
+      currentPath += '/' + seg;
+      breadcrumb += ` / <a href="javascript:void(0)" onclick="loadPanFileBrowser('${escapeHtml(currentPath)}', document.getElementById('pan-file-browser'), document.getElementById('pan-selected-info'))" style="color:#1890ff;">${escapeHtml(seg)}</a>`;
     }
+    breadcrumb += '</div>';
+
+    let html = breadcrumb;
+
+    // 返回上一级按钮（始终显示）
+    const hasHistory = container._history.length > 0;
+    if (hasHistory) {
+      const prevPath = container._history[container._history.length - 1];
+      html += `<div class="folder-item" style="background:#f0f5ff;" onclick="panFileBrowserBack(this)">
+        <span style="font-size:18px;margin-right:8px;">⬅️</span>
+        <span style="color:#1890ff;">返回上一级</span>
+        <span style="color:#999;font-size:12px;margin-left:8px;">${escapeHtml(prevPath)}</span>
+      </div>`;
+    }
+
     html += folders.map((f) => `
       <div class="folder-item" onclick="loadPanFileBrowser('${escapeHtml(f.path)}', document.getElementById('pan-file-browser'), document.getElementById('pan-selected-info'))">
         <span style="font-size:18px;margin-right:8px;">📁</span>
@@ -751,7 +803,7 @@ async function loadPanFileBrowser(path, container, infoEl) {
     }).join('');
 
     if (items.length === 0) {
-      html = '<div class="empty-state"><p style="font-size:14px;">该目录下没有文件</p></div>';
+      html += '<div class="empty-state"><p style="font-size:14px;">该目录下没有文件</p></div>';
     }
 
     container.innerHTML = html;
@@ -784,6 +836,14 @@ async function loadPanFileBrowser(path, container, infoEl) {
     });
   } catch (e) {
     container.innerHTML = `<div class="empty-state"><p>加载失败：${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function panFileBrowserBack(btn) {
+  const container = document.getElementById('pan-file-browser');
+  if (container._history && container._history.length > 0) {
+    const prevPath = container._history.pop();
+    loadPanFileBrowser(prevPath, container, document.getElementById('pan-selected-info'));
   }
 }
 

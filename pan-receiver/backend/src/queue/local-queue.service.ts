@@ -37,7 +37,13 @@ export class LocalQueueService {
       return;
     }
 
-    this.logger.log(`[Upload] Starting upload for ${fileRecord.fileName} (${fileId}) to ${submitterUserId}'s Baidu Pan`);
+    // 查询提交者是否绑定了百度网盘
+    const submitter = await this.prisma.user.findUnique({
+      where: { id: submitterUserId },
+      select: { baiduUid: true, baiduNickname: true },
+    });
+    const submitterBaiduBound = !!submitter?.baiduUid;
+    this.logger.log(`[Upload] Starting for ${fileRecord.fileName} (${fileId}), submitterBound=${submitterBaiduBound}`);
 
     try {
       // 标记为正在上传到百度网盘
@@ -47,15 +53,33 @@ export class LocalQueueService {
       });
       await this.updateSubmissionStatus(fileRecord.submissionId);
 
-      const client = await this.baiduPan.getClient(submitterUserId);
-      // 使用用户根目录下的文件夹，避免 /apps/ 需要特殊权限的问题
-      const panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      let panPath: string;
+      let transferUserId: string;
+      if (submitterBaiduBound) {
+        // 提交者绑定了网盘：上传到提交者网盘，然后创建分享让收集者转存
+        transferUserId = submitterUserId;
+        panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      } else {
+        // 提交者未绑定网盘：服务器直接上传到收集者的网盘
+        const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
+        if (!task) throw new Error('Task not found');
+        const submitterName = submitter?.baiduNickname || submitter?.baiduNickname || '匿名';
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        // 路径：{owner targetPath}/direct_submissions/{submitterName}_{dateStr}/{fileName}
+        panPath = `${task.targetPath}/direct_submissions/${submitterName}_${dateStr}/${fileRecord.fileName}`;
+        transferUserId = task.ownerUserId;
+      }
+
+      this.logger.log(`[Upload] Uploading ${localPath} -> ${panPath} (as user ${transferUserId})`);
+
+      const client = await this.baiduPan.getClient(transferUserId);
       this.logger.log(`[Upload] Ensuring folder: ${path.dirname(panPath)}`);
       await client.ensureFolder(path.dirname(panPath));
-      this.logger.log(`[Upload] Uploading ${localPath} -> ${panPath}`);
+      this.logger.log(`[Upload] Uploading to Baidu...`);
       await client.uploadFile(localPath, panPath);
       this.logger.log(`[Upload] Upload complete for ${fileId}`);
 
+      // 标记为已上传
       await this.prisma.submissionFile.update({
         where: { id: fileId },
         data: { submitterPanPath: panPath, transferStatus: 'uploaded_to_pan' },
@@ -64,7 +88,22 @@ export class LocalQueueService {
 
       try { fs.unlinkSync(localPath); } catch (_) {}
 
-      await this.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
+      // 根据绑定情况触发不同的后续步骤
+      if (submitterBaiduBound) {
+        // 走分享流程（创建分享让收集者转存）
+        await this.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
+      } else {
+        // 直接转存到收集者网盘 - 直接标记为已转存
+        await this.prisma.submissionFile.update({
+          where: { id: fileId },
+          data: {
+            ownerTargetPath: panPath,
+            transferStatus: 'transferred',
+          },
+        });
+        await this.updateSubmissionStatus(fileRecord.submissionId);
+        this.logger.log(`[Upload] Direct upload complete (no share needed): ${panPath}`);
+      }
     } catch (err: any) {
       const errMsg = err.errno ? `errno=${err.errno} ${err.message}` : err.message;
       this.logger.error(`[Upload] Failed for ${fileId}: ${errMsg}`, err.stack);

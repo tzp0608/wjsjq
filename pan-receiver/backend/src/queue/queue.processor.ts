@@ -21,9 +21,28 @@ export class UploadProcessor extends WorkerHost {
     const fileRecord = await this.prisma.submissionFile.findUnique({ where: { id: fileId } });
     if (!fileRecord) return;
 
+    const submitter = await this.prisma.user.findUnique({
+      where: { id: submitterUserId },
+      select: { baiduUid: true, baiduNickname: true },
+    });
+    const submitterBaiduBound = !!submitter?.baiduUid;
+
     try {
-      const client = await this.baiduPan.getClient(submitterUserId);
-      const panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      let panPath: string;
+      let transferUserId: string;
+      if (submitterBaiduBound) {
+        transferUserId = submitterUserId;
+        panPath = `/网盘收件助手/submissions/${taskId}/${fileRecord.submissionId}/${fileRecord.fileName}`;
+      } else {
+        const task = await this.prisma.receiveTask.findUnique({ where: { id: taskId } });
+        if (!task) throw new Error('Task not found');
+        const submitterName = submitter?.baiduNickname || '匿名';
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        panPath = `${task.targetPath}/direct_submissions/${submitterName}_${dateStr}/${fileRecord.fileName}`;
+        transferUserId = task.ownerUserId;
+      }
+
+      const client = await this.baiduPan.getClient(transferUserId);
       await client.ensureFolder(path.dirname(panPath));
       await client.uploadFile(localPath, panPath);
 
@@ -32,9 +51,16 @@ export class UploadProcessor extends WorkerHost {
         data: { submitterPanPath: panPath, transferStatus: 'uploaded_to_pan' },
       });
 
-      fs.unlinkSync(localPath);
+      try { fs.unlinkSync(localPath); } catch (_) {}
 
-      await this.queue.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
+      if (submitterBaiduBound) {
+        await this.queue.addShareJob({ submissionId: fileRecord.submissionId, submitterUserId, taskId });
+      } else {
+        await this.prisma.submissionFile.update({
+          where: { id: fileId },
+          data: { ownerTargetPath: panPath, transferStatus: 'transferred' },
+        });
+      }
     } catch (err: any) {
       await this.prisma.submissionFile.update({
         where: { id: fileId },

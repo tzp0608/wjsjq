@@ -33,7 +33,12 @@ export class AuthController {
       where: { id: req.user.userId },
       select: { id: true, nickname: true, baiduUid: true, baiduNickname: true },
     });
-    return { userId: user?.id, baiduBound: !!user?.baiduUid, baiduNickname: user?.baiduNickname };
+    return {
+      userId: user?.id,
+      baiduBound: !!user?.baiduUid,
+      baiduUid: user?.baiduUid || null,
+      baiduNickname: user?.baiduNickname || null,
+    };
   }
 
   @Get('baidu/auth-url')

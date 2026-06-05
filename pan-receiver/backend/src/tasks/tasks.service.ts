@@ -70,7 +70,7 @@ export class TasksService {
   async getPublicTask(taskId: string, code: string) {
     const task = await this.prisma.receiveTask.findUnique({
       where: { id: taskId },
-      include: { owner: { select: { nickname: true, baiduNickname: true } } },
+      include: { owner: { select: { nickname: true, baiduNickname: true, baiduUid: true } } },
     });
     if (!task) throw new NotFoundException('Task not found');
 
@@ -90,6 +90,7 @@ export class TasksService {
       title: task.title,
       description: task.description,
       ownerName: task.owner.baiduNickname || task.owner.nickname || '未知用户',
+      ownerBaiduUid: task.owner.baiduUid || null,
       deadline: task.deadline?.toISOString(),
       maxFileSize: Number(task.maxFileSize),
       maxFileCountPerSubmission: task.maxFileCountPerSubmission,
