@@ -1,8 +1,9 @@
-import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UseGuards } from '@nestjs/common';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
+import { AuthGuard } from '@nestjs/passport';
 
-@Controller('api')
+@Controller()
 export class AppController {
   constructor(
     private readonly appService: AppService,
@@ -24,27 +25,32 @@ export class AppController {
     };
   }
 
-  /** 查看最近的失败文件记录（用于调试） */
-  @Get('debug/failed-files')
-  async debugFailedFiles() {
-    const files = await this.prisma.submissionFile.findMany({
-      where: { transferStatus: 'failed' },
-      orderBy: { updatedAt: 'desc' },
-      take: 10,
-      include: { submission: true },
+  /** 简单的测试端点 - 用于诊断 */
+  @Get('test')
+  test(): { message: string; version: string; time: string } {
+    return {
+      message: 'API is working',
+      version: 'v1.0.5',
+      time: new Date().toISOString(),
+    };
+  }
+
+  /** 上传诊断 - 测试百度 token 是否有效 */
+  @Get('test/baidu-token')
+  async testBaiduToken() {
+    // 查找最近有百度 token 的用户
+    const user = await this.prisma.user.findFirst({
+      where: { baiduAccessTokenEncrypted: { not: null } },
+      orderBy: { createdAt: 'desc' },
     });
-    return files.map(f => ({
-      fileId: f.id,
-      fileName: f.fileName,
-      sourceType: f.sourceType,
-      transferStatus: f.transferStatus,
-      errorMessage: f.errorMessage,
-      submitterPanPath: f.submitterPanPath,
-      ownerTargetPath: f.ownerTargetPath,
-      updatedAt: f.updatedAt?.toISOString?.() || null,
-      taskId: f.taskId,
-      taskOwnerId: f.ownerUserId,
-      submitterUserId: f.submitterUserId,
-    }));
+    
+    if (!user) return { error: '没有绑定百度网盘的用户' };
+    
+    return {
+      userId: user.id,
+      baiduUid: user.baiduUid,
+      baiduNickname: user.baiduNickname,
+      tokenExpireAt: user.baiduTokenExpireAt?.toISOString(),
+    };
   }
 }
