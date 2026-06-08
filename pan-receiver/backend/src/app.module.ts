@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
-import { AppController, ApiController } from './app.controller';
+import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { CommonModule } from './common/common.module';
@@ -27,7 +27,7 @@ import { QueueModule } from './queue/queue.module';
     QueueModule.register(),
     SubmissionsModule,
   ],
-  controllers: [AppController, ApiController],
+  controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}
