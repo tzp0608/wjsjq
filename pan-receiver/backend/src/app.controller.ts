@@ -1,14 +1,11 @@
-import { Controller, Get, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
-import { AuthGuard } from '@nestjs/passport';
 
+// Root level routes
 @Controller()
 export class AppController {
-  constructor(
-    private readonly appService: AppService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly appService: AppService) {}
 
   @Get('hello')
   getHello(): string {
@@ -16,30 +13,23 @@ export class AppController {
   }
 
   @Get('health')
-  health(): { status: string; time: string; env: string[] } {
-    const relevant = ['NODE_ENV', 'APP_PORT', 'REDIS_URL', 'TEMP_FILE_DIR'];
-    return {
-      status: 'ok',
-      time: new Date().toISOString(),
-      env: relevant.filter(k => !!process.env[k]).map(k => `${k}=${process.env[k]}`),
-    };
+  health(): { status: string; time: string } {
+    return { status: 'ok', time: new Date().toISOString() };
   }
+}
 
-  /** 简单的测试端点 - 用于诊断 */
+// API routes
+@Controller('api')
+export class ApiController {
+  constructor(private readonly prisma: PrismaService) {}
+
   @Get('test')
-  test(): { message: string; version: string; time: string; build: string } {
-    return {
-      message: 'API is working',
-      version: 'v1.0.6',
-      time: new Date().toISOString(),
-      build: 'force-rebuild',
-    };
+  test(): { message: string; version: string; time: string } {
+    return { message: 'API is working', version: 'v1.0.7', time: new Date().toISOString() };
   }
 
-  /** 上传诊断 - 测试百度 token 是否有效 */
   @Get('test/baidu-token')
   async testBaiduToken() {
-    // 查找最近有百度 token 的用户
     const user = await this.prisma.user.findFirst({
       where: { baiduAccessTokenEncrypted: { not: null } },
       orderBy: { createdAt: 'desc' },
