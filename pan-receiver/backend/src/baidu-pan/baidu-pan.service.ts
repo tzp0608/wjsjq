@@ -80,7 +80,8 @@ export class BaiduPanService {
       return data.access_token;
     } catch (e: any) {
       if (e instanceof BadRequestException) throw e;
-      throw new BadRequestException('百度网盘授权已过期，请重新绑定');
+      console.error('[getValidToken] Refresh failed:', e.message);
+      throw new BadRequestException('百度网盘授权已过期，请重新绑定: ' + e.message);
     }
   }
 

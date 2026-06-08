@@ -9,6 +9,7 @@ export class BaiduPanController {
   @Get('files')
   @UseGuards(AuthGuard('jwt'))
   async listFiles(@Req() req: any, @Query('path') path: string) {
+    console.log('[baidu/files] listFiles called, path=', path || '/', 'userId=', req.user?.userId);
     try {
       const client = await this.baiduPan.getClient(req.user.userId);
       const items = await client.listFiles(path || '/');
@@ -23,13 +24,14 @@ export class BaiduPanController {
         })),
       };
     } catch (e: any) {
+      console.error('[baidu/files] Error:', e.message, e.errno);
       if (e.message?.includes('Baidu account not bound')) {
-        throw new BadRequestException('百度网盘未绑定');
+        throw new BadRequestException('百度网盘未绑定，请先绑定');
       }
-      if (e.errno === -6 || e.message?.includes('Baidu API error')) {
+      if (e.errno === -6 || e.message?.includes('expired') || e.message?.includes('过期')) {
         throw new BadRequestException('百度网盘授权已过期，请重新绑定');
       }
-      throw e;
+      throw new BadRequestException(e.message || '百度网盘请求失败');
     }
   }
 
