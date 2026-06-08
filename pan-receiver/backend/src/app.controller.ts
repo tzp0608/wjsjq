@@ -27,11 +27,12 @@ export class AppController {
 
   /** 简单的测试端点 - 用于诊断 */
   @Get('test')
-  test(): { message: string; version: string; time: string } {
+  test(): { message: string; version: string; time: string; build: string } {
     return {
       message: 'API is working',
-      version: 'v1.0.5',
+      version: 'v1.0.6',
       time: new Date().toISOString(),
+      build: 'force-rebuild',
     };
   }
 
