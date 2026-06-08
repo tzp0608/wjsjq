@@ -78,7 +78,6 @@ export class BaiduPanClient {
         rtype: 1,
       });
     } catch (e: any) {
-      // -8 表示已存在
       if (e.errno === -8 || e.message?.includes('file exist')) return {};
       throw e;
     }
@@ -87,7 +86,6 @@ export class BaiduPanClient {
   /** 确保目录路径存在 */
   async ensureFolder(dirPath: string) {
     if (!dirPath || dirPath === '/') return;
-    // 尝试一次性创建整个路径；如果中间目录不存在会失败，则逐级创建
     try {
       await this.createFolder(dirPath);
       return;
@@ -100,29 +98,20 @@ export class BaiduPanClient {
       try {
         await this.createFolder(current);
       } catch (e: any) {
-        if (e.errno === -6 || e.errno === -7) throw e; // token 过期必须停止
-        // 其他错误（如已存在）忽略继续
+        if (e.errno === -6 || e.errno === -7) throw e;
       }
     }
   }
 
   /**
-   * 上传文件到百度网盘的统一入口。
-   *
-   * 百度开放平台限制：第三方应用只能上传文件到 /apps/{appName}/ 目录下，
-   * 所以策略是：
-   *   1. 先上传到 /apps/_tmp_upload/ 临时目录（保证一定可以写入）
-   *   2. 确保目标父目录存在
-   *   3. 用 filemanager move 将文件移到最终位置
+   * 上传文件到百度网盘
+   * 策略：先上传到 /apps/_tmp_upload/ 临时目录，再 rename 到最终位置
    */
   async uploadFile(localFilePath: string, remotePath: string) {
     if (!fs.existsSync(localFilePath)) {
       throw new Error(`Local file not found: ${localFilePath}`);
     }
 
-    const fileSize = fs.statSync(localFilePath).size;
-
-    // Step 1: 上传到 /apps/_tmp_upload/
     const fileName = path.basename(remotePath);
     const tmpUploadDir = '/apps/_tmp_upload';
     
@@ -134,37 +123,34 @@ export class BaiduPanClient {
     const safeName = `${timestamp}_${randomSuffix}_${fileName}`;
     const appsTmpPath = `${tmpUploadDir}/${safeName}`;
 
-    console.log(`[BaiduClient] Uploading to temp: ${appsTmpPath} (${(fileSize / 1024).toFixed(1)} KB)`);
+    console.log(`[BaiduClient] Uploading to temp: ${appsTmpPath}`);
 
     // 执行 PCS 单步上传
     await this._pcsSingleUpload(localFilePath, appsTmpPath);
 
-    // 如果目标路径就在 /apps/ 下且不需要移动，直接返回
+    // 如果目标路径就在 /apps/ 下，不需要移动
     if (remotePath.startsWith('/apps/')) {
-      // 目标也在 /apps/ 内：先确保目标目录存在再 rename/move
       if (appsTmpPath !== remotePath) {
         await this.ensureFolder(path.dirname(remotePath));
-        await this._moveFile(appsTmpPath, remotePath);
+        await this._renameFile(appsTmpPath, remotePath);
       }
       return { path: remotePath };
     }
 
-    // Step 2: 目标不在 /apps/ 下 → 创建目标目录 + move 文件过去
+    // 目标不在 /apps/ 下 → 创建目标目录 + 移动文件
     console.log(`[BaiduClient] Moving from ${appsTmpPath} -> ${remotePath}`);
-
     await this.ensureFolder(path.dirname(remotePath));
-    await this._moveFile(appsTmpPath, remotePath);
+    await this._renameFile(appsTmpPath, remotePath);
 
     return { path: remotePath };
   }
 
-  /** PCS 单步上传（小文件 ≤4MB 直接传；大文件也走这个接口，百度有自动处理）*/
+  /** PCS 单步上传 */
   private async _pcsSingleUpload(localFilePath: string, pcsRemotePath: string) {
     const fileBuffer = fs.readFileSync(localFilePath);
     const form = new FormData();
     form.append('file', fileBuffer, { filename: path.basename(pcsRemotePath) });
 
-    // 使用 c.pcs.baidu.com 作为上传域名（稳定可用）
     const url = `https://c.pcs.baidu.com/rest/2.0/pcs/file?method=upload&access_token=${this.accessToken}&path=${encodeURIComponent(pcsRemotePath)}&ondup=newcopy`;
 
     let res: any;
@@ -191,8 +177,8 @@ export class BaiduPanClient {
     return res;
   }
 
-  /** 通过 xpan/filemanager 接口重命名(可跨目录=移动) */
-  private async _moveFile(srcPath: string, destPath: string) {
+  /** 重命名/移动文件 */
+  private async _renameFile(srcPath: string, destPath: string) {
     return this.post(
       'https://pan.baidu.com/rest/2.0/xpan/file?method=filemanager',
       undefined,
